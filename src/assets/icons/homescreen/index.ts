@@ -1,0 +1,12 @@
+export { default as PinSmall } from './pin-small.svg';
+export { default as ChevronDownSmall } from './chevron-down-small.svg';
+export { default as BellIcon } from './bell.svg';
+export { default as SearchIconHome } from './search.svg';
+export { default as MicIcon } from './mic.svg';
+export { default as StarIcon } from './star.svg';
+export { default as AddPlusIcon } from './add-plus.svg';
+export { default as NavHome } from './nav-home.svg';
+export { default as NavSearch } from './nav-search.svg';
+export { default as NavCategories } from './nav-categories.svg';
+export { default as NavOrders } from './nav-orders.svg';
+export { default as NavProfile } from './nav-profile.svg';

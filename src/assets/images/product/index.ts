@@ -1,0 +1,14 @@
+export const hero = require('./hero.png');
+export const brandIcon = require('./brand-icon.png');
+export const similar1_1 = require('./similar1-1.png');
+export const similar1_2 = require('./similar1-2.png');
+export const similar1_3 = require('./similar1-3.png');
+export const similar2_1 = require('./similar2-1.png');
+export const similar2_2 = require('./similar2-2.png');
+export const similar2_3 = require('./similar2-3.png');
+export const seeAllThumb1 = require('./see-all-thumb-1.png');
+export const seeAllThumb2 = require('./see-all-thumb-2.png');
+export const seeAllThumb3 = require('./see-all-thumb-3.png');
+export const cartPillThumb1 = require('./cart-pill-thumb-1.png');
+export const cartPillThumb2 = require('./cart-pill-thumb-2.png');
+export const cartPillThumb3 = require('./cart-pill-thumb-3.png');

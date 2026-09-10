@@ -1,0 +1,14 @@
+export { default as BackIcon } from './back.svg';
+export { default as PlusAddress } from './plus-address.svg';
+export { default as RadioHome } from './radio-home.svg';
+export { default as SaveHome } from './save-home.svg';
+export { default as SaveWork } from './save-work.svg';
+export { default as SaveOther } from './save-other.svg';
+export { default as DeliveryPin } from './delivery-pin.svg';
+export { default as WalletIcon } from './wallet.svg';
+export { default as SecurityShield } from './security-shield.svg';
+export { default as NetBankingIcon } from './netbanking.svg';
+export { default as ProcessingIcon } from './processing-icon.svg';
+export { default as CheckSmall } from './check-sm.svg';
+export { default as FailedIcon } from './failed-icon.svg';
+export { default as CouponCheck } from './coupon-check.svg';

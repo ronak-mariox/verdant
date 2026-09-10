@@ -1,22 +1,44 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-
 # dependencies
 node_modules/
 
-# Expo
-.expo/
-dist/
-web-build/
-expo-env.d.ts
+# Xcode
+build/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata
+*.xccheckout
+*.moved-aside
+DerivedData
+*.hmap
+*.ipa
+*.xcuserstate
+**/.xcode.env.local
+ios/Pods/
 
-# Native
+# Android
+.gradle
+.idea
+local.properties
+*.iml
+*.hprof
+.cxx/
+*.keystore
+!debug.keystore
 .kotlin/
-*.orig.*
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
+android/app/build/
+android/build/
+
+# Ruby / CocoaPods
+vendor/bundle/
+
+# Bundle artifact
+*.jsbundle
 
 # Metro
 .metro-health-check*
@@ -30,12 +52,17 @@ yarn-error.*
 .DS_Store
 *.pem
 
+# security
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
 # local env files
 .env*.local
 
 # typescript
 *.tsbuildinfo
 
-# generated native folders
-/ios
-/android
+# testing
+/coverage

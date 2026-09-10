@@ -1,0 +1,15 @@
+export const besan = require('./besan.png');
+export const fortuneThumb = require('./fortune-thumb.png');
+export const map = require('./map.png');
+export const gpayLogo = require('./gpay-logo.png');
+export const gpayIconSmall = require('./gpay-icon-small.png');
+export const historyThumb1 = require('./history-thumb-1.png');
+export const historyThumb2 = require('./history-thumb-2.png');
+export const historyThumb3 = require('./history-thumb-3.png');
+export const historyThumb4 = require('./history-thumb-4.png');
+export const reorderFortune = require('./reorder-fortune.png');
+export const reorderBesan = require('./reorder-besan.png');
+export const reorderMilk = require('./reorder-milk.png');
+export const reorderLays = require('./reorder-lays.png');
+export const reorderSpinach = require('./reorder-spinach.png');
+export const issueGrid = require('./issue-grid.png');
