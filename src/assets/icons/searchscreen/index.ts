@@ -1,0 +1,10 @@
+export { default as CloseXIcon } from './close-x.svg';
+export { default as ListViewIcon } from './list-view.svg';
+export { default as GridViewIcon } from './grid-view.svg';
+export { default as FilterIcon } from './filter.svg';
+export { default as SortArrowsIcon } from './sort-arrows.svg';
+export { default as RelevanceIcon } from './relevance.svg';
+export { default as CheckmarkWhiteIcon } from './checkmark-white.svg';
+export { default as PriceArrowIcon } from './price-arrow.svg';
+export { default as DiscountTagIcon } from './discount-tag.svg';
+export { default as PopularityIcon } from './popularity.svg';

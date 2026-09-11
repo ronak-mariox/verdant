@@ -41,6 +41,7 @@ import {
   ReorderScreen,
   ReportIssueScreen,
   ReviewOrderScreen,
+  SearchScreen,
   SettingsScreen,
   SplashScreen,
   StoreDetailScreen,
@@ -61,6 +62,7 @@ export function RootNavigator() {
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Otp" component={OtpScreen} />
         <Stack.Screen name="Home" component={HomeScreen} />
+        <Stack.Screen name="Search" component={SearchScreen} />
         <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
         <Stack.Screen name="Cart" component={CartScreen} />
         <Stack.Screen name="Address" component={AddressScreen} />

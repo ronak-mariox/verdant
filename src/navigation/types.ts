@@ -6,6 +6,7 @@ export type AuthStackParamList = {
   Login: undefined;
   Otp: { phoneNumber: string };
   Home: undefined;
+  Search: undefined;
   ProductDetail: { productId?: string } | undefined;
   Cart: undefined;
   Address: undefined;

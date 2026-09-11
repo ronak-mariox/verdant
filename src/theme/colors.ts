@@ -47,6 +47,7 @@ export const colors = {
     amberStrong: '#BB4D00',
   },
   gradients: {
+    progressBar: ['#4ADE80', '#22C55E'] as const,
     mapCard: ['#DCFCE7', '#BBF7D0'] as const,
     permissionOrb: ['#F0FDF4', '#DCFCE7'] as const,
     notFoundMap: ['#FEF9C3', '#FEF3C7'] as const,

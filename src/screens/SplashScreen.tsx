@@ -1,5 +1,6 @@
 import React from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Screen } from '../components';
 import { verdantLogo } from '../assets/images';
@@ -8,20 +9,35 @@ import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Splash'>;
 
+const LOGO_ASPECT_RATIO = 293 / 117;
+
 export function SplashScreen({ navigation }: Props) {
+  const { width: screenWidth } = useWindowDimensions();
+  const logoWidth = screenWidth * 0.71;
+  const logoHeight = logoWidth / LOGO_ASPECT_RATIO;
+
   return (
     <Screen backgroundColor={colors.brand.primary} statusBarStyle="light">
       <View style={styles.decorCircleTop} />
       <View style={styles.decorCircleLeft} />
       <View style={styles.decorCircleBottom} />
 
-      <View style={styles.logoWrap}>
-        <Image source={verdantLogo} style={styles.logo} resizeMode="contain" />
+      <View style={styles.logoWrap} pointerEvents="none">
+        <Image
+          source={verdantLogo}
+          style={{ width: logoWidth, height: logoHeight }}
+          resizeMode="contain"
+        />
       </View>
 
       <View style={styles.footer}>
         <View style={styles.progressTrack}>
-          <View style={styles.progressFill} />
+          <LinearGradient
+            colors={[...colors.gradients.progressBar]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.progressFill}
+          />
         </View>
 
         <Pressable
@@ -70,18 +86,21 @@ const styles = StyleSheet.create({
     opacity: 0.15,
   },
   logoWrap: {
-    flex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.xxxl,
-  },
-  logo: {
-    width: '100%',
-    height: 120,
   },
   footer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     paddingHorizontal: spacing.huge,
-    paddingBottom: spacing.huge,
+    paddingBottom: 64,
     gap: spacing.xxxl,
   },
   progressTrack: {
@@ -94,13 +113,13 @@ const styles = StyleSheet.create({
     height: 3,
     width: '72%',
     borderRadius: radius.full,
-    backgroundColor: colors.brand.gradientEnd,
   },
   button: {
     height: 56,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.text.onBrand,
+    backgroundColor: colors.brand.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -113,7 +132,7 @@ const styles = StyleSheet.create({
   },
   terms: {
     ...typography.caption,
-    color: colors.brand.primary,
+    color: colors.text.onBrandSubtle,
     textAlign: 'center',
   },
 });

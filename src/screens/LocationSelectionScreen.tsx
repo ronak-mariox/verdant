@@ -96,7 +96,7 @@ export function LocationSelectionScreen({ navigation }: Props) {
           leading={<LocateIcon width={18} height={18} />}
           leadingBackgroundColor={colors.brand.primary}
           trailing={<ChevronRight width={18} height={18} />}
-          emphasized
+          emphasized={selected === 'current-location'}
           onPress={() => setSelected('current-location')}
         />
       </View>
@@ -110,6 +110,7 @@ export function LocationSelectionScreen({ navigation }: Props) {
               title={place.title}
               subtitle={place.subtitle}
               leading={place.icon}
+              emphasized={selected === place.id}
               onPress={() => setSelected(place.id)}
             />
           ))}

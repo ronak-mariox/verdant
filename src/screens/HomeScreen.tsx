@@ -49,7 +49,9 @@ export function HomeScreen({ navigation }: Props) {
     navigation.navigate('StoreDetail', { storeId: `store-${index + 1}`, storeName: STORE_NAMES[index] });
   const handleTabChange = (tab: NavTab) => {
     setActiveTab(tab);
-    if (tab === 'orders') {
+    if (tab === 'search') {
+      navigation.navigate('Search');
+    } else if (tab === 'orders') {
       navigation.navigate('OrderHistory');
     } else if (tab === 'profile') {
       navigation.navigate('Profile');
@@ -59,7 +61,10 @@ export function HomeScreen({ navigation }: Props) {
   return (
     <View style={styles.flex}>
       <StatusBar barStyle="light-content" backgroundColor="#1CA672" />
-      <HomeTopBar location="Koramangala 5th Block, Bengaluru" />
+      <HomeTopBar
+        location="Koramangala 5th Block, Bengaluru"
+        onSearchPress={() => navigation.navigate('Search')}
+      />
 
       <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
         <CategoryTabs data={categoryTabs} activeId={activeCategory} onChange={setActiveCategory} />

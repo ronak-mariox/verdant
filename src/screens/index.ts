@@ -41,3 +41,4 @@ export * from './NotificationsScreen';
 export * from './NotificationDetailScreen';
 export * from './SettingsScreen';
 export * from './StoreDetailScreen';
+export * from './SearchScreen';

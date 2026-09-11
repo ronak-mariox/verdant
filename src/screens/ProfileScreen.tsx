@@ -29,6 +29,8 @@ export function ProfileScreen({ navigation }: Props) {
     setActiveTab(tab);
     if (tab === 'home') {
       navigation.navigate('Home');
+    } else if (tab === 'search') {
+      navigation.navigate('Search');
     } else if (tab === 'orders') {
       navigation.navigate('OrderHistory');
     }
