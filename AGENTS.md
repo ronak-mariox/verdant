@@ -1,3 +1,5 @@
-# Expo HAS CHANGED
+# Verdant (user app)
 
-Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before writing any code.
+This is a bare React Native CLI project (native `android/` and `ios/` projects present) — **not Expo**. There is no `expo` dependency; don't reach for Expo APIs, `expo-*` packages, or Expo-specific docs.
+
+See `src/services/api.ts` for the backend base URL, and the sibling `backend/` project for the API this app talks to.
