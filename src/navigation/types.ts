@@ -43,6 +43,7 @@ export type AuthStackParamList = {
   EditProfile: undefined;
   ProfileAddresses: undefined;
   ProfilePayments: undefined;
+  SavedItems: undefined;
   Notifications: undefined;
   NotificationDetail: { notificationId: string };
   Settings: undefined;

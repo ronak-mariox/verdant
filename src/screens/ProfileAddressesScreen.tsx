@@ -1,35 +1,44 @@
-import React, { useState } from 'react';
-import { Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { BackIcon } from '../assets/icons/order';
 import { AddrHomeIcon, AddrPlusIcon } from '../assets/icons/profile';
-import { profileAddresses as initialAddresses, type ProfileAddress } from '../data/profile';
+import { useCheckout } from '../context/CheckoutContext';
+import type { Address } from '../data/checkout';
+import { getErrorMessage } from '../services/api';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'ProfileAddresses'>;
 
-const TYPE_ICON_BG: Record<ProfileAddress['type'], string> = {
+const TYPE_ICON_BG: Record<Address['type'], string> = {
   Home: '#F0FDF4',
   Work: '#EFF6FF',
   Other: '#FFFBEB',
 };
 
-const TYPE_EMOJI: Record<ProfileAddress['type'], string> = {
+const TYPE_EMOJI: Record<Address['type'], string> = {
   Home: '🏠',
   Work: '💼',
   Other: '📍',
 };
 
 export function ProfileAddressesScreen({ navigation }: Props) {
-  const [addresses, setAddresses] = useState(initialAddresses);
+  const { addressList: addresses, isLoadingAddresses, setDefaultAddress, removeAddress: removeAddressFromServer } = useCheckout();
 
   const setDefault = (id: string) => {
-    setAddresses((prev) => prev.map((a) => ({ ...a, isDefault: a.id === id })));
+    setDefaultAddress(id).catch((err) => Alert.alert('Could not set default', getErrorMessage(err)));
   };
 
   const removeAddress = (id: string) => {
-    setAddresses((prev) => prev.filter((a) => a.id !== id));
+    Alert.alert('Delete address', 'Are you sure you want to delete this address?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => removeAddressFromServer(id).catch((err) => Alert.alert('Could not delete', getErrorMessage(err))),
+      },
+    ]);
   };
 
   return (
@@ -56,6 +65,9 @@ export function ProfileAddressesScreen({ navigation }: Props) {
 
       <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
         <View style={styles.body}>
+          {isLoadingAddresses && addresses.length === 0 ? (
+            <ActivityIndicator color="#1CA672" style={styles.loadingIndicator} />
+          ) : null}
           {addresses.map((address) => (
             <View key={address.id} style={styles.card}>
               <View style={styles.cardTop}>
@@ -169,6 +181,9 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 12,
     paddingBottom: 32,
+  },
+  loadingIndicator: {
+    paddingVertical: 40,
   },
   card: {
     backgroundColor: '#FFFFFF',

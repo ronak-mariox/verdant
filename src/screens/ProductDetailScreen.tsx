@@ -80,6 +80,7 @@ interface ProductDetailResponse {
   product: RawProduct;
   similar: RawProduct[];
   rating: RatingSummary;
+  isWishlisted: boolean;
 }
 
 /** Only surfaces attributes the product actually has set, instead of a fixed
@@ -148,9 +149,19 @@ export function ProductDetailScreen({ navigation, route }: Props) {
       .then(({ data }) => {
         setData(data);
         setSelectedVariantId(data.product.variants[0]?.id ?? null);
+        setIsWishlisted(data.isWishlisted);
       })
       .catch(() => setLoadError(true));
   }, [productId]);
+
+  const handleToggleWishlist = () => {
+    if (!productId) return;
+    setIsWishlisted((prev) => !prev);
+    api.post<{ isWishlisted: boolean }>(`/customer/wishlist/${productId}/toggle`).catch(() => {
+      // Revert the optimistic update if the request failed.
+      setIsWishlisted((prev) => !prev);
+    });
+  };
 
   if (loadError) {
     return (
@@ -221,7 +232,7 @@ export function ProductDetailScreen({ navigation, route }: Props) {
           <View style={styles.headerActions}>
             <Pressable
               style={[styles.iconCircle, isWishlisted && styles.iconCircleActive]}
-              onPress={() => setIsWishlisted((w) => !w)}
+              onPress={handleToggleWishlist}
               hitSlop={8}
             >
               <HeartOutline width={24} height={24} />

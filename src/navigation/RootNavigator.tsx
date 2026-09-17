@@ -47,6 +47,7 @@ import {
   ReviewOrderScreen,
   SearchScreen,
   SettingsScreen,
+  SavedItemsScreen,
   SplashScreen,
   StoreDetailScreen,
   SupportHomeScreen,
@@ -103,6 +104,7 @@ export function RootNavigator() {
         <Stack.Screen name="EditProfile" component={EditProfileScreen} />
         <Stack.Screen name="ProfileAddresses" component={ProfileAddressesScreen} />
         <Stack.Screen name="ProfilePayments" component={ProfilePaymentsScreen} />
+        <Stack.Screen name="SavedItems" component={SavedItemsScreen} />
         <Stack.Screen name="Notifications" component={NotificationsScreen} />
         <Stack.Screen name="NotificationDetail" component={NotificationDetailScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />

@@ -41,6 +41,7 @@ export * from './ProfileScreen';
 export * from './EditProfileScreen';
 export * from './ProfileAddressesScreen';
 export * from './ProfilePaymentsScreen';
+export * from './SavedItemsScreen';
 export * from './NotificationsScreen';
 export * from './NotificationDetailScreen';
 export * from './SettingsScreen';

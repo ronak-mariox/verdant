@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { BottomNavBar, type NavTab } from '../components/home/BottomNavBar';
 import {
@@ -17,10 +18,24 @@ import {
   MenuSettingsIcon,
 } from '../assets/icons/profile';
 import { avatar as defaultAvatar } from '../assets/images/profile';
-import { userProfile } from '../data/profile';
 import type { AuthStackParamList } from '../navigation/types';
 import { useAuth } from '../context/AuthContext';
-import { API_ORIGIN } from '../services/api';
+import { useCheckout } from '../context/CheckoutContext';
+import { API_ORIGIN, api } from '../services/api';
+
+const ACTIVE_ORDER_STATUSES = new Set(['placed', 'accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery']);
+
+interface RawOrderItem {
+  mrp?: number;
+  price: number;
+  quantity: number;
+}
+
+interface RawOrder {
+  status: string;
+  pricing: { discount: number };
+  items: RawOrderItem[];
+}
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Profile'>;
 
@@ -35,7 +50,37 @@ function formatMemberSince(iso?: string | null): string {
 
 export function ProfileScreen({ navigation }: Props) {
   const { user, logout, refreshUser } = useAuth();
+  const { addressList } = useCheckout();
   const [activeTab, setActiveTab] = useState<NavTab>('profile');
+  const [orders, setOrders] = useState<RawOrder[]>([]);
+  const [wishlistCount, setWishlistCount] = useState(0);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+
+  useFocusEffect(
+    useCallback(() => {
+      api.get<RawOrder[]>('/customer/orders').then(({ data }) => setOrders(data)).catch(() => {});
+      api.get<unknown[]>('/customer/wishlist').then(({ data }) => setWishlistCount(data.length)).catch(() => {});
+      api
+        .get<{ count: number }>('/customer/notifications/unread-count')
+        .then(({ data }) => setUnreadNotifications(data.count))
+        .catch(() => {});
+    }, []),
+  );
+
+  const ordersCount = orders.length;
+  const activeOrdersCount = useMemo(
+    () => orders.filter((o) => ACTIVE_ORDER_STATUSES.has(o.status)).length,
+    [orders],
+  );
+  const totalSaved = useMemo(
+    () =>
+      orders.reduce((sum, order) => {
+        const itemSavings = order.items.reduce((s, i) => s + ((i.mrp ?? i.price) - i.price) * i.quantity, 0);
+        return sum + itemSavings + (order.pricing?.discount ?? 0);
+      }, 0),
+    [orders],
+  );
+  const defaultAddress = addressList.find((a) => a.isDefault) ?? addressList[0];
 
   // Picks up anything changed on EditProfileScreen (name/email/avatar) even if this
   // screen instance was already mounted before the user navigated there and back.
@@ -90,17 +135,17 @@ export function ProfileScreen({ navigation }: Props) {
 
               <View style={styles.statsCard}>
                 <View style={styles.statCell}>
-                  <Text style={styles.statValue}>{userProfile.stats.orders}</Text>
+                  <Text style={styles.statValue}>{ordersCount}</Text>
                   <Text style={styles.statLabel}>Orders</Text>
                 </View>
                 <View style={styles.statDivider} />
                 <View style={styles.statCell}>
-                  <Text style={styles.statValue}>{userProfile.stats.saved}</Text>
+                  <Text style={styles.statValue}>{wishlistCount}</Text>
                   <Text style={styles.statLabel}>Saved</Text>
                 </View>
                 <View style={styles.statDivider} />
                 <View style={styles.statCell}>
-                  <Text style={styles.statValue}>{userProfile.stats.savedAmount}</Text>
+                  <Text style={styles.statValue}>₹{Math.round(totalSaved)}</Text>
                   <Text style={styles.statLabel}>Saved ₹</Text>
                 </View>
               </View>
@@ -122,14 +167,18 @@ export function ProfileScreen({ navigation }: Props) {
               iconWrapStyle={styles.iconWrapBlue}
               icon={<MenuAddressesIcon width={16} height={16} />}
               title="Addresses"
-              subtitle="3 saved · Home is default"
+              subtitle={
+                addressList.length === 0
+                  ? 'No addresses saved yet'
+                  : `${addressList.length} saved${defaultAddress ? ` · ${defaultAddress.type} is default` : ''}`
+              }
               onPress={() => navigation.navigate('ProfileAddresses')}
             />
             <MenuRow
               iconWrapStyle={styles.iconWrapPurple}
               icon={<MenuPaymentsIcon width={16} height={16} />}
               title="Payments"
-              subtitle="2 UPI · 1 card saved"
+              subtitle="Cash on Delivery"
               onPress={() => navigation.navigate('ProfilePayments')}
               last
             />
@@ -141,17 +190,17 @@ export function ProfileScreen({ navigation }: Props) {
               iconWrapStyle={styles.iconWrapAmber}
               icon={<MenuOrdersIcon width={16} height={16} />}
               title="Orders"
-              subtitle="24 orders placed"
+              subtitle={`${ordersCount} order${ordersCount === 1 ? '' : 's'} placed`}
               onPress={() => navigation.navigate('OrderHistory')}
-              badge="1 Active"
+              badge={activeOrdersCount > 0 ? `${activeOrdersCount} Active` : undefined}
               badgeColor="#1CA672"
             />
             <MenuRow
               iconWrapStyle={styles.iconWrapRose}
               icon={<MenuSavedIcon width={16} height={16} />}
               title="Saved Items"
-              subtitle="8 items in wishlist"
-              onPress={() => navigation.navigate('Home')}
+              subtitle={`${wishlistCount} item${wishlistCount === 1 ? '' : 's'} in wishlist`}
+              onPress={() => navigation.navigate('SavedItems')}
               last
             />
           </View>
@@ -162,9 +211,9 @@ export function ProfileScreen({ navigation }: Props) {
               iconWrapStyle={styles.iconWrapGreen}
               icon={<MenuNotificationsIcon width={16} height={16} />}
               title="Notifications"
-              subtitle="3 unread"
+              subtitle={unreadNotifications > 0 ? `${unreadNotifications} unread` : 'All caught up'}
               onPress={() => navigation.navigate('Notifications')}
-              badge="3"
+              badge={unreadNotifications > 0 ? String(unreadNotifications) : undefined}
               badgeColor="#EF4444"
             />
             <MenuRow

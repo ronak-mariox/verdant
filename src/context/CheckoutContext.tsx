@@ -63,6 +63,7 @@ interface CheckoutContextValue {
   addAddress: (input: AddressInput) => Promise<void>;
   updateAddress: (id: string, input: AddressInput) => Promise<void>;
   removeAddress: (id: string) => Promise<void>;
+  setDefaultAddress: (id: string) => Promise<void>;
   refreshAddresses: () => Promise<void>;
   deliverySpeed: DeliverySpeedId;
   setDeliverySpeed: (id: DeliverySpeedId) => void;
@@ -135,6 +136,14 @@ export function CheckoutProvider({ children }: { children: React.ReactNode }) {
     [refreshAddresses],
   );
 
+  const setDefaultAddress = useCallback(
+    async (id: string) => {
+      await api.patch(`/customer/addresses/${id}/default`);
+      await refreshAddresses();
+    },
+    [refreshAddresses],
+  );
+
   const value = useMemo(
     () => ({
       addressList,
@@ -144,6 +153,7 @@ export function CheckoutProvider({ children }: { children: React.ReactNode }) {
       addAddress,
       updateAddress,
       removeAddress,
+      setDefaultAddress,
       refreshAddresses,
       deliverySpeed,
       setDeliverySpeed,
@@ -161,6 +171,7 @@ export function CheckoutProvider({ children }: { children: React.ReactNode }) {
       addAddress,
       updateAddress,
       removeAddress,
+      setDefaultAddress,
       refreshAddresses,
       deliverySpeed,
       deliverySlot,
