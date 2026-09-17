@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CartIcon } from '../assets/icons/store';
 import { BottomNavBar, type NavTab } from '../components/home/BottomNavBar';
@@ -8,9 +9,11 @@ import { HomeTopBar } from '../components/home/HomeTopBar';
 import { ImageCardRow } from '../components/home/ImageCardRow';
 import { ProductRow } from '../components/home/ProductRow';
 import { SectionHeader } from '../components/home/SectionHeader';
+import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
-import { api } from '../services/api';
+import { API_ORIGIN, api } from '../services/api';
 import { resolveProductImage } from '../utils/productImage';
+import { avatar as defaultAvatar } from '../assets/images/home';
 import {
   banners,
   categoryTabs,
@@ -84,9 +87,21 @@ export function HomeScreen({ navigation }: Props) {
   const [activeTab, setActiveTab] = useState<NavTab>('home');
   const { width: screenWidth } = useWindowDimensions();
   const { itemCount, addItem } = useCart();
+  const { user } = useAuth();
+  const avatarSource = user?.avatarUrl ? { uri: `${API_ORIGIN}${user.avatarUrl}` } : defaultAvatar;
 
   const [homeData, setHomeData] = useState<RawHomeResponse | null>(null);
   const [rawProducts, setRawProducts] = useState<RawProduct[]>([]);
+  const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      api
+        .get<{ count: number }>('/customer/notifications/unread-count')
+        .then(({ data }) => setHasUnreadNotifications(data.count > 0))
+        .catch(() => {});
+    }, []),
+  );
 
   useEffect(() => {
     api
@@ -141,6 +156,8 @@ export function HomeScreen({ navigation }: Props) {
       <StatusBar barStyle="light-content" backgroundColor="#1CA672" />
       <HomeTopBar
         location="Koramangala 5th Block, Bengaluru"
+        avatarSource={avatarSource}
+        hasUnreadNotifications={hasUnreadNotifications}
         onSearchPress={() => navigation.navigate('Search')}
         onLocationPress={() => navigation.navigate('LocationSelection')}
         onNotificationsPress={() => navigation.navigate('Notifications')}

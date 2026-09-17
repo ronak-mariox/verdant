@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { BackIcon } from '../assets/icons/order';
 import {
@@ -11,10 +12,22 @@ import {
   NotifRefundIcon,
   NotifSecurityIcon,
 } from '../assets/icons/profile';
-import { notifications as allNotifications, type AppNotification, type NotificationKind } from '../data/profile';
+import type { NotificationKind } from '../data/profile';
 import type { AuthStackParamList } from '../navigation/types';
+import { api } from '../services/api';
+import { formatRelativeTime } from '../utils/relativeTime';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Notifications'>;
+
+interface RawNotification {
+  id: string;
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  orderId?: string;
+  isRead: boolean;
+  createdAt: string;
+}
 
 const KIND_BG: Record<NotificationKind, string> = {
   order: '#EFF6FF',
@@ -23,6 +36,15 @@ const KIND_BG: Record<NotificationKind, string> = {
   reorder: '#FDF4FF',
   refund: '#F0FDF4',
   security: '#FFF1F2',
+};
+
+const ACTION_LABEL: Record<NotificationKind, string> = {
+  order: 'Track →',
+  offer: 'Shop →',
+  delivered: 'Rate →',
+  reorder: 'Reorder →',
+  refund: '',
+  security: 'Review →',
 };
 
 function KindIcon({ kind }: { kind: NotificationKind }) {
@@ -45,16 +67,31 @@ function KindIcon({ kind }: { kind: NotificationKind }) {
 }
 
 export function NotificationsScreen({ navigation }: Props) {
-  const [items, setItems] = useState<AppNotification[]>(allNotifications);
+  const [items, setItems] = useState<RawNotification[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [tab, setTab] = useState<'all' | 'unread'>('all');
 
-  const unreadCount = useMemo(() => items.filter((n) => n.unread).length, [items]);
-  const visible = tab === 'unread' ? items.filter((n) => n.unread) : items;
+  useFocusEffect(
+    useCallback(() => {
+      api
+        .get<RawNotification[]>('/customer/notifications')
+        .then(({ data }) => setItems(data))
+        .catch(() => {})
+        .finally(() => setIsLoading(false));
+    }, []),
+  );
 
-  const markAllRead = () => setItems((prev) => prev.map((n) => ({ ...n, unread: false })));
+  const unreadCount = useMemo(() => items.filter((n) => !n.isRead).length, [items]);
+  const visible = tab === 'unread' ? items.filter((n) => !n.isRead) : items;
 
-  const openNotification = (notification: AppNotification) => {
-    setItems((prev) => prev.map((n) => (n.id === notification.id ? { ...n, unread: false } : n)));
+  const markAllRead = () => {
+    setItems((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    api.patch('/customer/notifications/read-all').catch(() => {});
+  };
+
+  const openNotification = (notification: RawNotification) => {
+    setItems((prev) => prev.map((n) => (n.id === notification.id ? { ...n, isRead: true } : n)));
+    api.patch(`/customer/notifications/${notification.id}/read`).catch(() => {});
     navigation.navigate('NotificationDetail', { notificationId: notification.id });
   };
 
@@ -87,30 +124,43 @@ export function NotificationsScreen({ navigation }: Props) {
 
       <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
         <View style={styles.body}>
-          {visible.map((notification) => (
-            <Pressable
-              key={notification.id}
-              style={[styles.card, notification.unread && styles.cardUnread]}
-              onPress={() => openNotification(notification)}
-            >
-              <View style={[styles.iconWrap, { backgroundColor: KIND_BG[notification.kind] }]}>
-                <KindIcon kind={notification.kind} />
-              </View>
-              <View style={styles.textWrap}>
-                <View style={styles.titleRow}>
-                  <Text style={styles.title}>{notification.title}</Text>
-                  {notification.unread ? <View style={styles.unreadDot} /> : null}
+          {isLoading ? (
+            <View style={styles.emptyWrap}>
+              <ActivityIndicator color="#1CA672" />
+            </View>
+          ) : visible.length === 0 ? (
+            <View style={styles.emptyWrap}>
+              <Text style={styles.emptyTitle}>{tab === 'unread' ? 'No unread notifications' : 'No notifications yet'}</Text>
+              <Text style={styles.emptySubtitle}>We'll let you know when there's something new.</Text>
+            </View>
+          ) : (
+            visible.map((notification) => (
+              <Pressable
+                key={notification.id}
+                style={[styles.card, !notification.isRead && styles.cardUnread]}
+                onPress={() => openNotification(notification)}
+              >
+                <View style={[styles.iconWrap, { backgroundColor: KIND_BG[notification.kind] }]}>
+                  <KindIcon kind={notification.kind} />
                 </View>
-                <Text style={styles.bodyText} numberOfLines={2}>
-                  {notification.body}
-                </Text>
-                <View style={styles.footerRow}>
-                  <Text style={styles.time}>{notification.time}</Text>
-                  {notification.actionLabel ? <Text style={styles.action}>{notification.actionLabel}</Text> : null}
+                <View style={styles.textWrap}>
+                  <View style={styles.titleRow}>
+                    <Text style={styles.title}>{notification.title}</Text>
+                    {!notification.isRead ? <View style={styles.unreadDot} /> : null}
+                  </View>
+                  <Text style={styles.bodyText} numberOfLines={2}>
+                    {notification.body}
+                  </Text>
+                  <View style={styles.footerRow}>
+                    <Text style={styles.time}>{formatRelativeTime(notification.createdAt)}</Text>
+                    {ACTION_LABEL[notification.kind] ? (
+                      <Text style={styles.action}>{ACTION_LABEL[notification.kind]}</Text>
+                    ) : null}
+                  </View>
                 </View>
-              </View>
-            </Pressable>
-          ))}
+              </Pressable>
+            ))
+          )}
         </View>
       </ScrollView>
     </View>
@@ -183,6 +233,21 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 10,
     paddingBottom: 32,
+  },
+  emptyWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 80,
+    gap: 6,
+  },
+  emptyTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1A1A1A',
+  },
+  emptySubtitle: {
+    fontSize: 12,
+    color: '#9CA3AF',
   },
   card: {
     flexDirection: 'row',

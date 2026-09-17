@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { map } from '../assets/images/order';
@@ -15,10 +15,22 @@ import {
   NotifRefundIcon,
   NotifSecurityIcon,
 } from '../assets/icons/profile';
-import { notifications, type NotificationKind } from '../data/profile';
+import type { NotificationKind } from '../data/profile';
 import type { AuthStackParamList } from '../navigation/types';
+import { api } from '../services/api';
+import { formatRelativeTime } from '../utils/relativeTime';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'NotificationDetail'>;
+
+interface RawNotification {
+  id: string;
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  orderId?: string;
+  isRead: boolean;
+  createdAt: string;
+}
 
 function KindIcon({ kind }: { kind: NotificationKind }) {
   switch (kind) {
@@ -40,10 +52,33 @@ function KindIcon({ kind }: { kind: NotificationKind }) {
 }
 
 export function NotificationDetailScreen({ navigation, route }: Props) {
-  const notification = useMemo(
-    () => notifications.find((n) => n.id === route.params.notificationId) ?? notifications[0],
-    [route.params.notificationId],
-  );
+  const { notificationId } = route.params;
+  const [notification, setNotification] = useState<RawNotification | null>(null);
+  const [isOutForDelivery, setIsOutForDelivery] = useState(false);
+
+  useEffect(() => {
+    api
+      .get<RawNotification>(`/customer/notifications/${notificationId}`)
+      .then(({ data }) => {
+        setNotification(data);
+        if (data.orderId) {
+          api
+            .get<{ status: string }>(`/customer/orders/${data.orderId}`)
+            .then(({ data: order }) => setIsOutForDelivery(order.status === 'out_for_delivery'))
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
+    api.patch(`/customer/notifications/${notificationId}/read`).catch(() => {});
+  }, [notificationId]);
+
+  if (!notification) {
+    return (
+      <View style={[styles.flex, styles.loadingWrap]}>
+        <ActivityIndicator color="#1CA672" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.flex}>
@@ -65,14 +100,14 @@ export function NotificationDetailScreen({ navigation, route }: Props) {
             </View>
             <Text style={styles.summaryTitle}>{notification.title}</Text>
             <Text style={styles.summaryBody}>{notification.body}</Text>
-            <Text style={styles.summaryTime}>{notification.time}</Text>
+            <Text style={styles.summaryTime}>{formatRelativeTime(notification.createdAt)}</Text>
           </View>
 
-          {notification.kind === 'order' ? (
+          {isOutForDelivery ? (
             <View style={styles.mapCard}>
               <Image source={map} style={styles.mapImage} />
               <View style={styles.mapOverlay}>
-                <Text style={styles.mapOverlayText}>Arriving in 12 min</Text>
+                <Text style={styles.mapOverlayText}>Your order is on its way</Text>
               </View>
             </View>
           ) : null}
@@ -109,6 +144,7 @@ export function NotificationDetailScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#F5F5F5' },
+  loadingWrap: { alignItems: 'center', justifyContent: 'center' },
   headerSafe: {
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,

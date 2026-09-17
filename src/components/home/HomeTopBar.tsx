@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, type ImageSourcePropType, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   BellIcon,
@@ -8,10 +8,12 @@ import {
   PinSmall,
   SearchIconHome,
 } from '../../assets/icons/homescreen';
-import { avatar } from '../../assets/images/home';
+import { avatar as defaultAvatar } from '../../assets/images/home';
 
 interface HomeTopBarProps {
   location: string;
+  avatarSource?: ImageSourcePropType;
+  hasUnreadNotifications?: boolean;
   onLocationPress?: () => void;
   onNotificationsPress?: () => void;
   onAvatarPress?: () => void;
@@ -20,6 +22,8 @@ interface HomeTopBarProps {
 
 export function HomeTopBar({
   location,
+  avatarSource,
+  hasUnreadNotifications,
   onLocationPress,
   onNotificationsPress,
   onAvatarPress,
@@ -47,10 +51,10 @@ export function HomeTopBar({
         <View style={styles.actionsRow}>
           <Pressable style={styles.iconButton} onPress={onNotificationsPress}>
             <BellIcon width={18} height={18} />
-            <View style={styles.notifDot} />
+            {hasUnreadNotifications ? <View style={styles.notifDot} /> : null}
           </Pressable>
           <Pressable onPress={onAvatarPress}>
-            <Image source={avatar} style={styles.avatar} />
+            <Image source={avatarSource ?? defaultAvatar} style={styles.avatar} />
           </Pressable>
         </View>
       </View>
