@@ -20,6 +20,7 @@ import type { AuthStackParamList } from '../navigation/types';
 import type { ProductItem } from '../data/home';
 import { api } from '../services/api';
 import { resolveProductImage } from '../utils/productImage';
+import { resolveCategoryCoverIcon } from '../utils/categoryIcon';
 import { colors, radius, spacing, typography } from '../theme';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'CategoryDetail'>;
@@ -245,7 +246,7 @@ export function CategoryDetailScreen({ navigation, route }: Props) {
               <Pressable style={styles.recommendedCard} onPress={() => openOtherCategory(item.id)}>
                 <View style={[styles.recommendedIconWrap, { backgroundColor: colors.background.surfaceMuted }]}>
                   <Image
-                    source={resolveProductImage(item.subcategories[0]?.imageUrl ?? item.imageUrl)}
+                    source={resolveCategoryCoverIcon(item)}
                     style={styles.recommendedIcon}
                     resizeMode="cover"
                   />

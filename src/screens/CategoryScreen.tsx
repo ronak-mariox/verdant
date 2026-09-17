@@ -20,7 +20,7 @@ import { BottomNavBar, type NavTab } from '../components/home/BottomNavBar';
 import { categoryPromoCards, recentlyViewed } from '../data/categories';
 import type { AuthStackParamList } from '../navigation/types';
 import { api } from '../services/api';
-import { resolveProductImage } from '../utils/productImage';
+import { resolveCategoryIcon } from '../utils/categoryIcon';
 import { colors, fontFamily, radius, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Category'>;
@@ -101,7 +101,7 @@ export function CategoryScreen({ navigation }: Props) {
                 { width: tileSize, height: tileSize, backgroundColor: TILE_BACKGROUNDS[index % TILE_BACKGROUNDS.length] },
               ]}
             >
-              <Image source={resolveProductImage(sub.imageUrl)} style={styles.gridIcon} resizeMode="cover" />
+              <Image source={resolveCategoryIcon(category, sub)} style={styles.gridIcon} resizeMode="cover" />
             </View>
             <Text style={styles.gridLabel} numberOfLines={2}>
               {sub.name}
