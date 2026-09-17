@@ -1,16 +1,70 @@
-import React, { useState } from 'react';
-import { Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { BackIcon, RefundWalletIcon } from '../assets/icons/order';
 import { OrderMiniCard } from '../components/order/OrderMiniCard';
 import { cancellationPolicy, cancellationReasons } from '../data/orders';
+import { api, getErrorMessage } from '../services/api';
+import { resolveProductImage } from '../utils/productImage';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'CancelOrder'>;
 
-export function CancelOrderScreen({ navigation }: Props) {
+interface RawOrderItem {
+  productId: string;
+  variantId: string;
+  name: string;
+  variantLabel: string;
+  imageUrl?: string;
+  price: number;
+  mrp: number;
+  quantity: number;
+  subtotal: number;
+}
+
+interface RawOrder {
+  id: string;
+  orderNumber: string;
+  items: RawOrderItem[];
+  pricing: { itemsTotal: number; taxTotal: number; deliveryFee: number; platformFee: number; discount: number; grandTotal: number };
+  paymentMethod: 'cod' | 'online';
+  placedAt: string;
+}
+
+export function CancelOrderScreen({ navigation, route }: Props) {
+  const { orderId } = route.params;
+  const [order, setOrder] = useState<RawOrder | null>(null);
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    api.get<RawOrder>(`/customer/orders/${orderId}`).then(({ data }) => setOrder(data));
+  }, [orderId]);
+
+  const handleConfirm = async () => {
+    if (!selectedReason || submitting) return;
+    const reason = cancellationReasons.find((r) => r.id === selectedReason);
+    setSubmitting(true);
+    try {
+      await api.post(`/customer/orders/${orderId}/cancel`, { reason: reason?.title });
+      navigation.navigate('OrderCancelled', { orderId });
+    } catch (err) {
+      Alert.alert('Could not cancel order', getErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!order) {
+    return (
+      <View style={styles.loadingWrap}>
+        <ActivityIndicator color="#1CA672" size="large" />
+      </View>
+    );
+  }
+
+  const isCod = order.paymentMethod === 'cod';
 
   return (
     <View style={styles.flex}>
@@ -29,15 +83,30 @@ export function CancelOrderScreen({ navigation }: Props) {
 
       <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
         <View style={styles.body}>
-          <OrderMiniCard />
+          <OrderMiniCard
+            orderNumber={order.orderNumber}
+            date={new Date(order.placedAt).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
+            itemCount={order.items.length}
+            total={order.pricing.grandTotal}
+            thumbs={order.items.slice(0, 3).map((item) => resolveProductImage(item.imageUrl))}
+          />
 
           <View style={styles.refundBanner}>
             <View style={styles.refundIconWrap}>
               <RefundWalletIcon width={16} height={16} />
             </View>
             <View style={styles.refundTextWrap}>
-              <Text style={styles.refundTitle}>₹477 refund to Google Pay</Text>
-              <Text style={styles.refundSubtitle}>Within 5–7 business days · priya@okaxis</Text>
+              {isCod ? (
+                <>
+                  <Text style={styles.refundTitle}>No charge was made</Text>
+                  <Text style={styles.refundSubtitle}>Cash on Delivery — nothing to refund</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.refundTitle}>₹{order.pricing.grandTotal} refund</Text>
+                  <Text style={styles.refundSubtitle}>Within 5–7 business days</Text>
+                </>
+              )}
             </View>
           </View>
 
@@ -78,12 +147,12 @@ export function CancelOrderScreen({ navigation }: Props) {
       <SafeAreaView edges={['bottom']} style={styles.footerSafe}>
         <View style={styles.footer}>
           <Pressable
-            style={[styles.confirmButton, !selectedReason && styles.confirmButtonDisabled]}
-            disabled={!selectedReason}
-            onPress={() => navigation.navigate('OrderCancelled')}
+            style={[styles.confirmButton, (!selectedReason || submitting) && styles.confirmButtonDisabled]}
+            disabled={!selectedReason || submitting}
+            onPress={handleConfirm}
           >
             <Text style={styles.confirmButtonText}>
-              {selectedReason ? 'Confirm Cancellation' : 'Select a reason to continue'}
+              {submitting ? 'Cancelling…' : selectedReason ? 'Confirm Cancellation' : 'Select a reason to continue'}
             </Text>
           </Pressable>
           <Pressable style={styles.keepButton} onPress={() => navigation.goBack()}>
@@ -97,6 +166,7 @@ export function CancelOrderScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#F5F5F5' },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F5F5' },
   headerSafe: {
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,

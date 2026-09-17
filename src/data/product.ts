@@ -1,3 +1,4 @@
+import type { ImageSourcePropType } from 'react-native';
 import * as img from '../assets/images/product';
 
 export interface Variant {
@@ -16,7 +17,7 @@ export const variants: Variant[] = [
 
 export interface SimilarProduct {
   id: string;
-  image: number;
+  image: ImageSourcePropType;
   brand: string;
   name: string;
   weight: string;

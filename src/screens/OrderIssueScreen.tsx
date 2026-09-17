@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Linking, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -10,6 +10,7 @@ import {
   IssueWaitDotIcon,
   IssueWarningIcon,
 } from '../assets/icons/order';
+import { api } from '../services/api';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'OrderIssue'>;
@@ -21,6 +22,16 @@ const TIMELINE = [
 ];
 
 export function OrderIssueScreen({ navigation }: Props) {
+  // This screen has no orderId in its route params — it isn't wired into any
+  // navigation flow yet. Fall back to the customer's most recent order so the
+  // "Cancel & Refund" action has a real order to act on, matching the pattern
+  // used by OrderTrackingScreen's orderId-less fallback.
+  const [latestOrderId, setLatestOrderId] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.get<{ id: string }[]>('/customer/orders').then(({ data }) => setLatestOrderId(data[0]?.id ?? null));
+  }, []);
+
   return (
     <View style={styles.flex}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFF1F2" />
@@ -80,7 +91,10 @@ export function OrderIssueScreen({ navigation }: Props) {
                 <Text style={styles.rescheduleText}>Reschedule</Text>
               </Pressable>
             </View>
-            <Pressable style={styles.cancelRefundButton} onPress={() => navigation.navigate('CancelOrder')}>
+            <Pressable
+              style={styles.cancelRefundButton}
+              onPress={() => latestOrderId && navigation.navigate('CancelOrder', { orderId: latestOrderId })}
+            >
               <Text style={styles.cancelRefundText}>Cancel &amp; Refund</Text>
             </Pressable>
           </View>

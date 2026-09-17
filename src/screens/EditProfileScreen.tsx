@@ -1,23 +1,163 @@
-import React, { useState } from 'react';
-import { Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { launchCamera, launchImageLibrary, type Asset } from 'react-native-image-picker';
 import { BackIcon } from '../assets/icons/order';
 import { EditProfilePencilIcon } from '../assets/icons/profile';
-import { avatar } from '../assets/images/profile';
-import { userProfile } from '../data/profile';
+import { avatar as defaultAvatar } from '../assets/images/profile';
 import type { AuthStackParamList } from '../navigation/types';
+import { useAuth } from '../context/AuthContext';
+import { api, API_ORIGIN, getErrorMessage, getFieldErrors } from '../services/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'EditProfile'>;
 
-const GENDERS: Array<'Female' | 'Male' | 'Other'> = ['Female', 'Male', 'Other'];
+type GenderValue = 'female' | 'male' | 'other';
+
+const GENDER_OPTIONS: Array<{ label: string; value: GenderValue }> = [
+  { label: 'Female', value: 'female' },
+  { label: 'Male', value: 'male' },
+  { label: 'Other', value: 'other' },
+];
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DEFAULT_DOB = new Date(2000, 0, 1);
+
+function parseIsoDate(iso?: string | null): Date | null {
+  if (!iso) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!match) return null;
+  const [, y, m, d] = match;
+  return new Date(Number(y), Number(m) - 1, Number(d));
+}
+
+function formatIsoDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function formatDisplayDate(date: Date): string {
+  return `${String(date.getDate()).padStart(2, '0')} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+function isGenderValue(value: string | null | undefined): value is GenderValue {
+  return value === 'female' || value === 'male' || value === 'other';
+}
 
 export function EditProfileScreen({ navigation }: Props) {
-  const [name, setName] = useState(userProfile.name);
-  const [email, setEmail] = useState(userProfile.email);
-  const [phone, setPhone] = useState(userProfile.phone.replace('+91 ', ''));
-  const [dob, setDob] = useState(userProfile.dob);
-  const [gender, setGender] = useState(userProfile.gender);
+  const { user, updateProfile, refreshUser } = useAuth();
+
+  const [name, setName] = useState(user?.name ?? '');
+  const [email, setEmail] = useState(user?.email ?? '');
+  const [dob, setDob] = useState<Date | null>(parseIsoDate(user?.dob));
+  const [gender, setGender] = useState<GenderValue | null>(isGenderValue(user?.gender) ? user!.gender as GenderValue : null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const phoneDisplay = user?.phone ?? '';
+  const avatarSource = useMemo(
+    () => (user?.avatarUrl ? { uri: `${API_ORIGIN}${user.avatarUrl}` } : defaultAvatar),
+    [user?.avatarUrl],
+  );
+
+  const handleDateChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+    }
+    if (event.type === 'dismissed') {
+      return;
+    }
+    if (selectedDate) {
+      setDob(selectedDate);
+    }
+  };
+
+  const uploadAvatar = async (asset: Asset) => {
+    if (!asset.uri) return;
+    setAvatarUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('avatar', {
+        uri: asset.uri,
+        name: asset.fileName ?? `avatar-${Date.now()}.jpg`,
+        type: asset.type ?? 'image/jpeg',
+      } as unknown as Blob);
+
+      await api.post('/customer/me/avatar', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      await refreshUser();
+    } catch (err) {
+      Alert.alert('Upload failed', getErrorMessage(err, 'Could not upload photo. Please try again.'));
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
+  const handleChangePhoto = () => {
+    if (avatarUploading) return;
+    Alert.alert('Change photo', 'Choose a source', [
+      {
+        text: 'Take Photo',
+        onPress: async () => {
+          const result = await launchCamera({ mediaType: 'photo', quality: 0.8, includeBase64: false });
+          const asset = result.assets?.[0];
+          if (asset) await uploadAvatar(asset);
+        },
+      },
+      {
+        text: 'Choose from Gallery',
+        onPress: async () => {
+          const result = await launchImageLibrary({ mediaType: 'photo', quality: 0.8, includeBase64: false });
+          const asset = result.assets?.[0];
+          if (asset) await uploadAvatar(asset);
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const handleSave = async () => {
+    if (saving) return;
+    setSaving(true);
+    setErrorMessage(null);
+    setFieldErrors({});
+    try {
+      await updateProfile({
+        name: name.trim(),
+        email: email.trim(),
+        ...(dob ? { dob: formatIsoDate(dob) } : {}),
+        ...(gender ? { gender } : {}),
+      });
+      navigation.goBack();
+    } catch (err) {
+      const fields = getFieldErrors(err);
+      if (fields) {
+        setFieldErrors(fields);
+      }
+      setErrorMessage(getErrorMessage(err, 'Could not save changes. Please try again.'));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <View style={styles.flex}>
@@ -37,18 +177,37 @@ export function EditProfileScreen({ navigation }: Props) {
       <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
         <View style={styles.body}>
           <View style={styles.avatarSection}>
-            <View style={styles.avatarWrap}>
-              <Image source={avatar} style={styles.avatarImage} />
+            <Pressable style={styles.avatarWrap} onPress={handleChangePhoto} disabled={avatarUploading}>
+              <Image source={avatarSource} style={styles.avatarImage} />
               <View style={styles.editBadge}>
                 <EditProfilePencilIcon width={11} height={11} />
               </View>
-            </View>
-            <Text style={styles.changePhotoText}>Change photo</Text>
+              {avatarUploading ? (
+                <View style={styles.avatarOverlay}>
+                  <ActivityIndicator color="#FFFFFF" />
+                </View>
+              ) : null}
+            </Pressable>
+            <Pressable onPress={handleChangePhoto} disabled={avatarUploading} hitSlop={8}>
+              <Text style={styles.changePhotoText}>{avatarUploading ? 'Uploading…' : 'Change photo'}</Text>
+            </Pressable>
           </View>
 
+          {errorMessage ? (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorBannerText}>{errorMessage}</Text>
+            </View>
+          ) : null}
+
           <View style={styles.card}>
-            <Field label="FULL NAME" value={name} onChangeText={setName} />
-            <Field label="EMAIL ADDRESS" value={email} onChangeText={setEmail} keyboardType="email-address" />
+            <Field label="FULL NAME" value={name} onChangeText={setName} error={fieldErrors.name} />
+            <Field
+              label="EMAIL ADDRESS"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              error={fieldErrors.email}
+            />
 
             <View style={styles.field}>
               <Text style={styles.label}>PHONE NUMBER</Text>
@@ -57,31 +216,53 @@ export function EditProfileScreen({ navigation }: Props) {
                   <Text style={styles.phonePrefixFlag}>🇮🇳</Text>
                   <Text style={styles.phonePrefixText}>+91</Text>
                 </View>
-                <TextInput
-                  style={styles.phoneInput}
-                  value={phone}
-                  onChangeText={(t) => setPhone(t.replace(/[^0-9 ]/g, ''))}
-                  keyboardType="number-pad"
-                  maxLength={11}
-                />
+                <View style={[styles.phoneInput, styles.phoneInputReadonly]}>
+                  <Text style={styles.phoneInputText}>{phoneDisplay}</Text>
+                </View>
               </View>
-              <Text style={styles.helperText}>OTP will be sent to verify number changes</Text>
+              <Text style={styles.helperText}>Contact support to change your registered number</Text>
             </View>
 
-            <Field label="DATE OF BIRTH" value={dob} onChangeText={setDob} />
+            <View style={styles.field}>
+              <Text style={styles.label}>DATE OF BIRTH</Text>
+              <Pressable style={styles.input} onPress={() => setShowDatePicker(true)}>
+                <Text style={dob ? styles.dateValueText : styles.dateValuePlaceholder}>
+                  {dob ? formatDisplayDate(dob) : 'Select date of birth'}
+                </Text>
+              </Pressable>
+              {fieldErrors.dob ? <Text style={styles.fieldErrorText}>{fieldErrors.dob}</Text> : null}
+              {showDatePicker ? (
+                <View style={styles.datePickerWrap}>
+                  <DateTimePicker
+                    value={dob ?? DEFAULT_DOB}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    maximumDate={new Date()}
+                    onChange={handleDateChange}
+                  />
+                  {Platform.OS === 'ios' ? (
+                    <Pressable style={styles.dateDoneButton} onPress={() => setShowDatePicker(false)}>
+                      <Text style={styles.dateDoneText}>Done</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
+            </View>
 
             <View style={styles.field}>
               <Text style={styles.label}>GENDER</Text>
               <View style={styles.genderRow}>
-                {GENDERS.map((option) => {
-                  const active = option === gender;
+                {GENDER_OPTIONS.map((option) => {
+                  const active = option.value === gender;
                   return (
                     <Pressable
-                      key={option}
+                      key={option.value}
                       style={[styles.genderChip, active && styles.genderChipActive]}
-                      onPress={() => setGender(option)}
+                      onPress={() => setGender(option.value)}
                     >
-                      <Text style={[styles.genderChipText, active && styles.genderChipTextActive]}>{option}</Text>
+                      <Text style={[styles.genderChipText, active && styles.genderChipTextActive]}>
+                        {option.label}
+                      </Text>
                     </Pressable>
                   );
                 })}
@@ -93,8 +274,16 @@ export function EditProfileScreen({ navigation }: Props) {
 
       <SafeAreaView edges={['bottom']} style={styles.footerSafe}>
         <View style={styles.footer}>
-          <Pressable style={styles.saveButton} onPress={() => navigation.goBack()}>
-            <Text style={styles.saveButtonText}>Save Changes</Text>
+          <Pressable
+            style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+            onPress={handleSave}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.saveButtonText}>Save Changes</Text>
+            )}
           </Pressable>
         </View>
       </SafeAreaView>
@@ -107,16 +296,19 @@ function Field({
   value,
   onChangeText,
   keyboardType,
+  error,
 }: {
   label: string;
   value: string;
   onChangeText: (t: string) => void;
   keyboardType?: 'default' | 'email-address';
+  error?: string;
 }) {
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
       <TextInput style={styles.input} value={value} onChangeText={onChangeText} keyboardType={keyboardType} />
+      {error ? <Text style={styles.fieldErrorText}>{error}</Text> : null}
     </View>
   );
 }
@@ -187,11 +379,41 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  avatarOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 38,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   changePhotoText: {
     fontSize: 12,
     fontWeight: '600',
     color: '#1CA672',
     paddingTop: 8,
+  },
+  errorBanner: {
+    marginTop: 16,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 14,
+    padding: 12,
+  },
+  errorBannerText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#DC2626',
+  },
+  fieldErrorText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#DC2626',
+    paddingTop: 4,
   },
   card: {
     backgroundColor: '#FFFFFF',
@@ -225,6 +447,38 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 14,
     color: '#1A1A1A',
+    justifyContent: 'center',
+  },
+  dateValueText: {
+    fontSize: 14,
+    color: '#1A1A1A',
+  },
+  dateValuePlaceholder: {
+    fontSize: 14,
+    color: '#9CA3AF',
+  },
+  datePickerWrap: {
+    marginTop: 8,
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1.5,
+    borderColor: '#E5E7EB',
+    borderRadius: 16,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  dateDoneButton: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    paddingVertical: 10,
+    marginHorizontal: 16,
+    marginTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  dateDoneText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1CA672',
   },
   phoneRow: {
     flexDirection: 'row',
@@ -258,6 +512,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 14,
     color: '#1A1A1A',
+  },
+  phoneInputReadonly: {
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+  },
+  phoneInputText: {
+    fontSize: 14,
+    color: '#6B7280',
   },
   helperText: {
     fontSize: 11,
@@ -310,6 +572,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 10,
     elevation: 4,
+  },
+  saveButtonDisabled: {
+    opacity: 0.7,
   },
   saveButtonText: {
     fontSize: 15,

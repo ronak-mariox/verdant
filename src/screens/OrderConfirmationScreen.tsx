@@ -1,14 +1,64 @@
-import React from 'react';
-import { Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CheckIcon, PinIcon, SavingsIcon, TrackIcon } from '../assets/icons/order';
-import { activeOrder } from '../data/orders';
+import { api } from '../services/api';
+import { resolveProductImage } from '../utils/productImage';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'OrderConfirmation'>;
 
-export function OrderConfirmationScreen({ navigation }: Props) {
+interface RawOrderItem {
+  productId: string;
+  variantId: string;
+  name: string;
+  variantLabel: string;
+  imageUrl?: string;
+  price: number;
+  mrp: number;
+  quantity: number;
+  subtotal: number;
+}
+
+interface RawOrder {
+  id: string;
+  orderNumber: string;
+  items: RawOrderItem[];
+  address: { contactName?: string; line1: string; line2?: string; city: string; state: string; pincode: string };
+  pricing: { itemsTotal: number; taxTotal: number; deliveryFee: number; platformFee: number; discount: number; grandTotal: number };
+  couponCode?: string;
+  placedAt: string;
+}
+
+export function OrderConfirmationScreen({ navigation, route }: Props) {
+  const { orderId } = route.params;
+  const [order, setOrder] = useState<RawOrder | null>(null);
+
+  useEffect(() => {
+    api.get<RawOrder>(`/customer/orders/${orderId}`).then(({ data }) => setOrder(data));
+  }, [orderId]);
+
+  const etaBy = useMemo(() => {
+    if (!order) return '';
+    const eta = new Date(new Date(order.placedAt).getTime() + 20 * 60 * 1000);
+    return eta.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }, [order]);
+
+  const itemDiscount = useMemo(
+    () => order?.items.reduce((sum, i) => sum + (i.mrp - i.price) * i.quantity, 0) ?? 0,
+    [order],
+  );
+  const savings = itemDiscount + (order?.pricing.discount ?? 0);
+
+  if (!order) {
+    return (
+      <View style={styles.loadingWrap}>
+        <ActivityIndicator color="#1CA672" size="large" />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.flex}>
       <StatusBar barStyle="light-content" backgroundColor="#1CA672" />
@@ -25,11 +75,11 @@ export function OrderConfirmationScreen({ navigation }: Props) {
             <View style={styles.heroChipsRow}>
               <View style={styles.heroChip}>
                 <Text style={styles.heroChipLabel}>ORDER ID</Text>
-                <Text style={styles.heroChipValue}>{activeOrder.id}</Text>
+                <Text style={styles.heroChipValue}>{order.orderNumber}</Text>
               </View>
               <View style={styles.heroChip}>
-                <Text style={styles.heroChipLabel}>ARRIVING IN</Text>
-                <Text style={styles.heroChipValue}>{activeOrder.eta} mins · {activeOrder.etaBy}</Text>
+                <Text style={styles.heroChipLabel}>ARRIVING BY</Text>
+                <Text style={styles.heroChipValue}>{etaBy}</Text>
               </View>
             </View>
           </View>
@@ -45,36 +95,42 @@ export function OrderConfirmationScreen({ navigation }: Props) {
                 <Text style={styles.cardHeaderTitle}>Delivery address</Text>
               </View>
               <View style={styles.homeTag}>
-                <Text style={styles.homeTagText}>{activeOrder.address.label}</Text>
+                <Text style={styles.homeTagText}>Delivery</Text>
               </View>
             </View>
             <View style={styles.addressBody}>
-              <Text style={styles.addressName}>{activeOrder.address.name}</Text>
-              <Text style={styles.addressLine}>{activeOrder.address.line1}</Text>
-              <Text style={styles.addressLine}>{activeOrder.address.line2}</Text>
+              <Text style={styles.addressName}>{order.address.contactName}</Text>
+              <Text style={styles.addressLine}>{order.address.line1}</Text>
+              <Text style={styles.addressLine}>
+                {[order.address.line2, order.address.city, `${order.address.state} – ${order.address.pincode}`]
+                  .filter(Boolean)
+                  .join(', ')}
+              </Text>
             </View>
           </View>
 
           <View style={styles.card}>
             <View style={styles.itemsHeaderRow}>
-              <Text style={styles.itemsHeaderTitle}>{activeOrder.items.length} Items</Text>
-              <Pressable onPress={() => navigation.navigate('Cart')}>
-                <Text style={styles.editCartLink}>Edit cart</Text>
+              <Text style={styles.itemsHeaderTitle}>{order.items.length} Items</Text>
+              <Pressable onPress={() => navigation.navigate('Home')}>
+                <Text style={styles.editCartLink}>Continue shopping</Text>
               </Pressable>
             </View>
-            {activeOrder.items.map((item, index) => (
+            {order.items.map((item, index) => (
               <View
-                key={item.id}
-                style={[styles.itemRow, index === activeOrder.items.length - 1 && styles.itemRowLast]}
+                key={`${item.productId}-${item.variantId}`}
+                style={[styles.itemRow, index === order.items.length - 1 && styles.itemRowLast]}
               >
                 <View style={[styles.itemImageWrap, { backgroundColor: index === 0 ? '#FFF7ED' : '#FEF9C3' }]}>
-                  <Image source={item.image} style={styles.itemImage} resizeMode="contain" />
+                  <Image source={resolveProductImage(item.imageUrl)} style={styles.itemImage} resizeMode="contain" />
                 </View>
                 <View style={styles.itemInfo}>
                   <Text style={styles.itemName}>{item.name}</Text>
-                  <Text style={styles.itemSubtitle}>{item.subtitle}</Text>
+                  <Text style={styles.itemSubtitle}>
+                    {item.variantLabel} × {item.quantity}
+                  </Text>
                 </View>
-                <Text style={styles.itemPrice}>₹{item.price}</Text>
+                <Text style={styles.itemPrice}>₹{item.subtotal}</Text>
               </View>
             ))}
           </View>
@@ -84,41 +140,39 @@ export function OrderConfirmationScreen({ navigation }: Props) {
               <Text style={styles.cardHeaderTitle}>Bill summary</Text>
             </View>
             <View style={styles.billBody}>
-              <BillRow label="Item total" value={`₹${activeOrder.itemTotal}`} />
-              <BillRow label="Item discount" value={`-₹${activeOrder.itemDiscount}`} valueColor="#1CA672" />
-              {activeOrder.couponCode ? (
-                <BillRow
-                  label={`Coupon ${activeOrder.couponCode}`}
-                  value={`-₹${activeOrder.couponDiscount}`}
-                  valueColor="#1CA672"
-                />
+              <BillRow label="Item total" value={`₹${order.pricing.itemsTotal}`} />
+              {itemDiscount > 0 ? <BillRow label="Item discount" value={`-₹${itemDiscount}`} valueColor="#1CA672" /> : null}
+              {order.couponCode ? (
+                <BillRow label={`Coupon ${order.couponCode}`} value={`-₹${order.pricing.discount}`} valueColor="#1CA672" />
               ) : null}
               <BillRow
                 label="Delivery fee"
-                value={activeOrder.deliveryFee === 0 ? 'FREE' : `₹${activeOrder.deliveryFee}`}
+                value={order.pricing.deliveryFee === 0 ? 'FREE' : `₹${order.pricing.deliveryFee}`}
                 valueColor="#1CA672"
               />
-              <BillRow label="Platform fee" value={`₹${activeOrder.platformFee}`} labelColor="#9CA3AF" />
+              <BillRow label="Platform fee" value={`₹${order.pricing.platformFee}`} labelColor="#9CA3AF" />
               <View style={styles.totalRow}>
                 <Text style={styles.totalLabel}>Total paid</Text>
-                <Text style={styles.totalValue}>₹{activeOrder.total}</Text>
+                <Text style={styles.totalValue}>₹{order.pricing.grandTotal}</Text>
               </View>
             </View>
-            <View style={styles.savingsBannerWrap}>
-              <View style={styles.savingsBanner}>
-                <SavingsIcon width={32} height={32} />
-                <Text style={styles.savingsText}>You saved ₹{activeOrder.savings} on this order!</Text>
+            {savings > 0 ? (
+              <View style={styles.savingsBannerWrap}>
+                <View style={styles.savingsBanner}>
+                  <SavingsIcon width={32} height={32} />
+                  <Text style={styles.savingsText}>You saved ₹{savings} on this order!</Text>
+                </View>
               </View>
-            </View>
+            ) : null}
           </View>
 
-          <Pressable style={styles.trackButton} onPress={() => navigation.navigate('OrderTracking')}>
+          <Pressable style={styles.trackButton} onPress={() => navigation.navigate('OrderTracking', { orderId: order.id })}>
             <TrackIcon width={16} height={16} />
             <Text style={styles.trackButtonText}>Track Order</Text>
           </Pressable>
           <Pressable
             style={styles.detailsButton}
-            onPress={() => navigation.navigate('OrderDetails', { orderId: activeOrder.id })}
+            onPress={() => navigation.navigate('OrderDetails', { orderId: order.id })}
           >
             <Text style={styles.detailsButtonText}>View Order Details</Text>
           </Pressable>
@@ -175,6 +229,7 @@ const billStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#F5F5F5' },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F5F5' },
   heroSafe: {
     backgroundColor: '#1CA672',
     overflow: 'hidden',

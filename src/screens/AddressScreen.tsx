@@ -1,9 +1,10 @@
 import React from 'react';
-import { Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { PlusAddress } from '../assets/icons/checkout';
 import { CheckoutHeader } from '../components/checkout/CheckoutHeader';
 import { useCheckout } from '../context/CheckoutContext';
+import { getErrorMessage } from '../services/api';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Address'>;
@@ -75,7 +76,12 @@ export function AddressScreen({ navigation }: Props) {
                       <Text style={styles.editButtonText}>Edit</Text>
                     </Pressable>
                     {!address.isDefault ? (
-                      <Pressable style={styles.deleteButton} onPress={() => removeAddress(address.id)}>
+                      <Pressable
+                        style={styles.deleteButton}
+                        onPress={() =>
+                          removeAddress(address.id).catch((err) => Alert.alert('Could not delete address', getErrorMessage(err)))
+                        }
+                      >
                         <Text style={styles.deleteButtonText}>Delete</Text>
                       </Pressable>
                     ) : null}

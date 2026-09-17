@@ -14,7 +14,7 @@ const REASONS = [
   'Network connection was interrupted',
 ];
 
-export function PaymentFailedScreen({ navigation }: Props) {
+export function PaymentFailedScreen({ navigation, route }: Props) {
   const transactionId = useMemo(() => `TXN${Math.floor(100000000 + Math.random() * 900000000)}`, []);
 
   return (
@@ -26,7 +26,8 @@ export function PaymentFailedScreen({ navigation }: Props) {
         </View>
         <Text style={styles.title}>Payment Failed</Text>
         <Text style={styles.subtitle}>
-          We couldn't process your payment. Don't worry, no amount has been deducted from your account.
+          {route.params?.message ??
+            "We couldn't process your payment. Don't worry, no amount has been deducted from your account."}
         </Text>
 
         <View style={styles.txnCard}>

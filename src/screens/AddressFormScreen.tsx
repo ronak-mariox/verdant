@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StatusBar,
@@ -12,8 +14,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SaveHome, SaveOther, SaveWork } from '../assets/icons/checkout';
 import { CheckoutHeader } from '../components/checkout/CheckoutHeader';
-import { useCheckout } from '../context/CheckoutContext';
+import { useCheckout, type AddressInput } from '../context/CheckoutContext';
 import type { Address } from '../data/checkout';
+import { getErrorMessage } from '../services/api';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'AddressForm'>;
@@ -33,31 +36,41 @@ export function AddressFormScreen({ navigation, route }: Props) {
   const [name, setName] = useState(editing?.name ?? '');
   const [phone, setPhone] = useState(editing?.phone ?? '');
   const [house, setHouse] = useState(editing?.line1 ?? '');
-  const [street, setStreet] = useState(editing ? editing.line2.split(',')[0] : '');
-  const [landmark, setLandmark] = useState('');
-  const [city, setCity] = useState(editing ? 'Noida' : '');
-  const [pincode, setPincode] = useState(editing ? '201309' : '');
-  const [state, setState] = useState(editing ? 'Uttar Pradesh' : '');
+  const [street, setStreet] = useState(editing?.street ?? '');
+  const [landmark, setLandmark] = useState(editing?.landmark ?? '');
+  const [city, setCity] = useState(editing?.city ?? '');
+  const [pincode, setPincode] = useState(editing?.pincode ?? '');
+  const [state, setState] = useState(editing?.state ?? '');
   const [saveAs, setSaveAs] = useState<Address['type']>(editing?.type ?? 'Home');
+  const [isSaving, setIsSaving] = useState(false);
 
   const isValid = name.trim() && phone.trim().length === 10 && house.trim() && street.trim() && city.trim() && pincode.trim().length === 6 && state.trim();
 
-  const handleSubmit = () => {
-    const address: Address = {
-      id: editing?.id ?? `addr-${Date.now()}`,
+  const handleSubmit = async () => {
+    const input: AddressInput = {
       type: saveAs,
-      isDefault: editing?.isDefault,
       name: name.trim(),
-      line1: house.trim(),
-      line2: `${street.trim()}, ${city.trim()}, ${state.trim()} – ${pincode.trim()}`,
       phone: phone.trim(),
+      line1: house.trim(),
+      street: street.trim(),
+      landmark: landmark.trim() || undefined,
+      city: city.trim(),
+      state: state.trim(),
+      pincode: pincode.trim(),
     };
-    if (isEdit) {
-      updateAddress(address);
-    } else {
-      addAddress(address);
+    setIsSaving(true);
+    try {
+      if (isEdit && editing) {
+        await updateAddress(editing.id, input);
+      } else {
+        await addAddress(input);
+      }
+      navigation.goBack();
+    } catch (err) {
+      Alert.alert('Could not save address', getErrorMessage(err));
+    } finally {
+      setIsSaving(false);
     }
-    navigation.goBack();
   };
 
   return (
@@ -134,11 +147,15 @@ export function AddressFormScreen({ navigation, route }: Props) {
       <SafeAreaView edges={['bottom']} style={styles.footerSafe}>
         <View style={styles.footer}>
           <Pressable
-            style={[styles.submitButton, !isValid && styles.submitButtonDisabled]}
-            disabled={!isValid}
+            style={[styles.submitButton, (!isValid || isSaving) && styles.submitButtonDisabled]}
+            disabled={!isValid || isSaving}
             onPress={handleSubmit}
           >
-            <Text style={styles.submitButtonText}>{isEdit ? 'Update Address' : 'Save Address'}</Text>
+            {isSaving ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.submitButtonText}>{isEdit ? 'Update Address' : 'Save Address'}</Text>
+            )}
           </Pressable>
         </View>
       </SafeAreaView>

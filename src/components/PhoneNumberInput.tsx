@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { forwardRef } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { CheckCircle, ChevronDown } from '../assets/icons';
 import { colors, radius, spacing, typography } from '../theme';
@@ -9,32 +9,37 @@ interface PhoneNumberInputProps {
   isValid: boolean;
 }
 
-export function PhoneNumberInput({ value, onChangeText, isValid }: PhoneNumberInputProps) {
-  return (
-    <View style={styles.container}>
-      <View style={styles.codeSection}>
-        <Text style={styles.flag}>🇮🇳</Text>
-        <Text style={styles.code}>+91</Text>
-        <ChevronDown width={12} height={12} />
-      </View>
-      <TextInput
-        value={value}
-        onChangeText={(text) => onChangeText(text.replace(/[^0-9]/g, ''))}
-        placeholder="98765 43210"
-        placeholderTextColor={colors.text.inputPlaceholder}
-        keyboardType="number-pad"
-        maxLength={10}
-        style={styles.input}
-        accessibilityLabel="Mobile number"
-      />
-      {isValid ? (
-        <View style={styles.checkWrap}>
-          <CheckCircle width={12} height={12} />
+export const PhoneNumberInput = forwardRef<TextInput, PhoneNumberInputProps>(
+  ({ value, onChangeText, isValid }, ref) => {
+    return (
+      <View style={styles.container}>
+        <View style={styles.codeSection}>
+          <Text style={styles.flag}>🇮🇳</Text>
+          <Text style={styles.code}>+91</Text>
+          <ChevronDown width={12} height={12} />
         </View>
-      ) : null}
-    </View>
-  );
-}
+        <TextInput
+          ref={ref}
+          value={value}
+          onChangeText={(text) => onChangeText(text.replace(/[^0-9]/g, ''))}
+          placeholder="98765 43210"
+          placeholderTextColor={colors.text.inputPlaceholder}
+          keyboardType="number-pad"
+          maxLength={10}
+          style={styles.input}
+          accessibilityLabel="Mobile number"
+        />
+        {isValid ? (
+          <View style={styles.checkWrap}>
+            <CheckCircle width={12} height={12} />
+          </View>
+        ) : null}
+      </View>
+    );
+  },
+);
+
+PhoneNumberInput.displayName = 'PhoneNumberInput';
 
 const styles = StyleSheet.create({
   container: {

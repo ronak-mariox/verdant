@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AuthHeader, Button, OtpInputGroup, Screen } from '../components';
 import { AlertX, CheckSmall, InfoDot, InfoIcon, MailIcon } from '../assets/icons';
 import { colors, fontFamily, radius, spacing, typography } from '../theme';
 import type { AuthStackParamList } from '../navigation/types';
+import { useAuth } from '../context/AuthContext';
+import { getErrorMessage } from '../services/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Otp'>;
 
@@ -25,9 +27,16 @@ function maskPhone(phone: string) {
 
 export function OtpScreen({ navigation, route }: Props) {
   const { phoneNumber } = route.params;
+  const { loginWithOtp, requestOtp } = useAuth();
   const [otp, setOtp] = useState('');
   const [status, setStatus] = useState<'default' | 'error'>('default');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(RESEND_SECONDS);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  // Dev-only convenience: the backend echoes the generated OTP outside production so testers
+  // don't need real SMS delivery. Gated behind __DEV__ and never present in a prod response.
+  const [devOtp, setDevOtp] = useState(route.params.devOtp);
 
   useEffect(() => {
     if (secondsLeft <= 0) return;
@@ -37,23 +46,45 @@ export function OtpScreen({ navigation, route }: Props) {
 
   const isComplete = otp.length === OTP_LENGTH;
 
-  const handleVerify = () => {
-    if (otp === '000000') {
+  const handleVerify = async () => {
+    if (!isComplete || isVerifying) return;
+    setIsVerifying(true);
+    try {
+      const result = await loginWithOtp(phoneNumber, otp);
+      if (result.isNewUser) {
+        navigation.replace('CreateAccount', { phoneNumber, verifiedPhoneToken: result.verifiedPhoneToken });
+      } else {
+        navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+      }
+    } catch (err) {
+      setErrorMessage(getErrorMessage(err, 'Incorrect or expired OTP'));
       setStatus('error');
-      return;
+    } finally {
+      setIsVerifying(false);
     }
-    navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
   };
 
   const handleTryAgain = () => {
     setOtp('');
     setStatus('default');
+    setErrorMessage(null);
   };
 
-  const handleRequestNewOtp = () => {
-    setOtp('');
-    setStatus('default');
-    setSecondsLeft(RESEND_SECONDS);
+  const handleRequestNewOtp = async () => {
+    if (isResending) return;
+    setIsResending(true);
+    try {
+      const result = await requestOtp(phoneNumber);
+      setDevOtp(__DEV__ ? result.devOtp : undefined);
+      setOtp('');
+      setStatus('default');
+      setErrorMessage(null);
+      setSecondsLeft(RESEND_SECONDS);
+    } catch (err) {
+      Alert.alert('Could not resend OTP', getErrorMessage(err));
+    } finally {
+      setIsResending(false);
+    }
   };
 
   if (status === 'error') {
@@ -66,7 +97,7 @@ export function OtpScreen({ navigation, route }: Props) {
           title="Incorrect OTP"
           subtitle={
             <Text style={styles.headerSubtitle}>
-              {`That code doesn't match. ${maskPhone(phoneNumber)} — please check the SMS.`}
+              {errorMessage ?? `That code doesn't match. ${maskPhone(phoneNumber)} — please check the SMS.`}
             </Text>
           }
         />
@@ -81,6 +112,7 @@ export function OtpScreen({ navigation, route }: Props) {
           <Button
             label="Request New OTP"
             variant="soft"
+            loading={isResending}
             onPress={handleRequestNewOtp}
             style={styles.stackedButton}
           />
@@ -123,7 +155,9 @@ export function OtpScreen({ navigation, route }: Props) {
           <OtpInputGroup value={otp} onChange={setOtp} autoFocus />
         </View>
 
-        <Text style={styles.hint}>Tip: enter any 6 digits to verify (000000 = error demo)</Text>
+        {__DEV__ && devOtp ? (
+          <Text style={styles.devHint}>Dev OTP: {devOtp} (development builds only)</Text>
+        ) : null}
 
         <View style={styles.resendRow}>
           {secondsLeft > 0 ? (
@@ -137,7 +171,7 @@ export function OtpScreen({ navigation, route }: Props) {
             </View>
           ) : (
             <Text style={styles.resendNow} onPress={handleRequestNewOtp}>
-              Resend OTP
+              {isResending ? 'Resending…' : 'Resend OTP'}
             </Text>
           )}
           <Text style={styles.changeNumber} onPress={() => navigation.navigate('Login')}>
@@ -161,7 +195,12 @@ export function OtpScreen({ navigation, route }: Props) {
           </Text>
         </View>
 
-        <Button label="Verify & Continue" disabled={!isComplete} onPress={handleVerify} />
+        <Button
+          label="Verify & Continue"
+          disabled={!isComplete}
+          loading={isVerifying}
+          onPress={handleVerify}
+        />
       </View>
     </Screen>
   );
@@ -189,10 +228,10 @@ const styles = StyleSheet.create({
   otpWrap: {
     paddingBottom: spacing.md,
   },
-  hint: {
+  devHint: {
     ...typography.caption,
     fontFamily: fontFamily.bodyBold,
-    color: colors.text.faint,
+    color: colors.status.success,
     paddingBottom: spacing.xl,
   },
   resendRow: {

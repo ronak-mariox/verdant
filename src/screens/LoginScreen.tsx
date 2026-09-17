@@ -1,17 +1,38 @@
 import React, { useState } from 'react';
-import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Button, PhoneNumberInput, Screen } from '../components';
-import { AppleLogo, GoogleLogo } from '../assets/icons';
 import { loginLogo } from '../assets/images';
 import { colors, fontFamily, radius, spacing, typography } from '../theme';
 import type { AuthStackParamList } from '../navigation/types';
+import { useAuth } from '../context/AuthContext';
+import { getErrorMessage } from '../services/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
 export function LoginScreen({ navigation }: Props) {
+  const { requestOtp } = useAuth();
   const [phone, setPhone] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const isValid = phone.length === 10;
+
+  const handleSendOtp = async () => {
+    if (!isValid || isSubmitting) return;
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    try {
+      const result = await requestOtp(phone);
+      // Dev-only convenience: the backend echoes the generated OTP outside production so
+      // testers don't need real SMS delivery. Never present in a production API response.
+      const devOtp = __DEV__ ? result.devOtp : undefined;
+      navigation.navigate('Otp', { phoneNumber: phone, devOtp });
+    } catch (err) {
+      setErrorMessage(getErrorMessage(err, 'Could not send OTP. Please try again.'));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <Screen edges={['left', 'right']} scrollable>
@@ -27,44 +48,19 @@ export function LoginScreen({ navigation }: Props) {
 
         <Text style={styles.label}>Mobile Number</Text>
         <PhoneNumberInput value={phone} onChangeText={setPhone} isValid={isValid} />
-
-        <View style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>or continue with</Text>
-          <View style={styles.dividerLine} />
-        </View>
-
-        <View style={styles.socialRow}>
-          <Pressable
-            style={({ pressed }) => [styles.socialButton, styles.googleButton, pressed && styles.pressed]}
-            onPress={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })}
-          >
-            <GoogleLogo width={20} height={20} />
-            <Text style={styles.socialLabel}>Google</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [styles.socialButton, styles.appleButton, pressed && styles.pressed]}
-            onPress={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })}
-          >
-            <AppleLogo width={20} height={20} />
-            <Text style={styles.socialLabel}>Apple</Text>
-          </Pressable>
-        </View>
+        {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
         <Button
           label="Send OTP"
           disabled={!isValid}
-          onPress={() => navigation.navigate('Otp', { phoneNumber: phone })}
+          loading={isSubmitting}
+          onPress={handleSendOtp}
+          style={styles.sendButton}
         />
 
         <View style={styles.signupRow}>
           <Text style={styles.signupText}>New to Verdant? </Text>
-          <Pressable
-            hitSlop={8}
-            onPress={() =>
-              Alert.alert('Create account', 'Enter your mobile number above and verify via OTP to create your Verdant account.')
-            }
-          >
+          <Pressable hitSlop={8} onPress={() => navigation.navigate('Signup')}>
             <Text style={styles.signupLink}>Create account</Text>
           </Pressable>
         </View>
@@ -131,49 +127,13 @@ const styles = StyleSheet.create({
     color: colors.text.label,
     marginBottom: spacing.xxs + 2,
   },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.xxl,
+  errorText: {
+    ...typography.bodySmall,
+    color: colors.status.errorText,
+    paddingTop: spacing.xs,
   },
-  dividerLine: {
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.background.surfaceMuted,
-  },
-  dividerText: {
-    ...typography.caption,
-    color: colors.text.subtle,
-  },
-  socialRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    paddingBottom: spacing.xxxl,
-  },
-  socialButton: {
-    flex: 1,
-    height: 52,
-    borderRadius: radius.md,
-    borderWidth: 1.5,
-    borderColor: colors.border.light,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-  },
-  googleButton: {
-    backgroundColor: colors.background.redTint,
-  },
-  appleButton: {
-    backgroundColor: colors.background.surfaceAlt,
-  },
-  pressed: {
-    opacity: 0.85,
-  },
-  socialLabel: {
-    ...typography.buttonMedium,
-    color: colors.text.buttonNeutral,
+  sendButton: {
+    marginTop: spacing.xxxl,
   },
   signupRow: {
     flexDirection: 'row',

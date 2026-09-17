@@ -1,5 +1,5 @@
-import React from 'react';
-import { Alert, Image, Pressable, ScrollView, Share, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, Share, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
@@ -9,14 +9,105 @@ import {
   ReorderIcon,
   SupportIcon,
 } from '../assets/icons/order';
-import { gpayIconSmall } from '../assets/images/order';
 import { OrderProgressTracker } from '../components/order/OrderProgressTracker';
-import { activeOrder } from '../data/orders';
+import { api } from '../services/api';
+import { resolveProductImage } from '../utils/productImage';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'OrderDetails'>;
 
-export function OrderDetailsScreen({ navigation }: Props) {
+type BackendStatus =
+  | 'placed'
+  | 'accepted'
+  | 'preparing'
+  | 'ready_for_pickup'
+  | 'out_for_delivery'
+  | 'delivered'
+  | 'cancelled'
+  | 'rejected';
+
+interface RawOrderItem {
+  productId: string;
+  variantId: string;
+  name: string;
+  variantLabel: string;
+  imageUrl?: string;
+  price: number;
+  mrp: number;
+  quantity: number;
+  subtotal: number;
+}
+
+interface RawOrder {
+  id: string;
+  orderNumber: string;
+  items: RawOrderItem[];
+  address: { contactName?: string; line1: string; line2?: string; city: string; state: string; pincode: string };
+  pricing: { itemsTotal: number; taxTotal: number; deliveryFee: number; platformFee: number; discount: number; grandTotal: number };
+  couponCode?: string;
+  paymentMethod: 'cod' | 'online';
+  status: BackendStatus;
+  placedAt: string;
+  deliveredAt?: string;
+}
+
+const STATUS_LABELS: Record<BackendStatus, string> = {
+  placed: 'Order placed',
+  accepted: 'Accepted',
+  preparing: 'Preparing',
+  ready_for_pickup: 'Ready for pickup',
+  out_for_delivery: 'Out for delivery',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+  rejected: 'Rejected',
+};
+
+const STATUS_INDEX: Partial<Record<BackendStatus, number>> = {
+  placed: 0,
+  accepted: 1,
+  preparing: 1,
+  ready_for_pickup: 2,
+  out_for_delivery: 3,
+  delivered: 4,
+};
+
+const CANCELLABLE_STATUSES: BackendStatus[] = ['placed', 'accepted', 'preparing'];
+
+export function OrderDetailsScreen({ navigation, route }: Props) {
+  const { orderId } = route.params;
+  const [order, setOrder] = useState<RawOrder | null>(null);
+
+  useEffect(() => {
+    api.get<RawOrder>(`/customer/orders/${orderId}`).then(({ data }) => setOrder(data));
+  }, [orderId]);
+
+  const itemDiscount = useMemo(
+    () => order?.items.reduce((sum, i) => sum + (i.mrp - i.price) * i.quantity, 0) ?? 0,
+    [order],
+  );
+  const savings = itemDiscount + (order?.pricing.discount ?? 0);
+
+  if (!order) {
+    return (
+      <View style={styles.loadingWrap}>
+        <ActivityIndicator color="#1CA672" size="large" />
+      </View>
+    );
+  }
+
+  const isCancelledLike = order.status === 'cancelled' || order.status === 'rejected';
+  const isDelivered = order.status === 'delivered';
+  const isCancellable = CANCELLABLE_STATUSES.includes(order.status);
+  const activeIndex = isDelivered ? 4 : STATUS_INDEX[order.status] ?? 0;
+
+  const placedDate = new Date(order.placedAt);
+  const etaDate = new Date(placedDate.getTime() + 20 * 60 * 1000);
+  const etaMinutes = Math.max(0, Math.round((etaDate.getTime() - Date.now()) / 60000));
+  const etaByText = etaDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const deliveredDateText = order.deliveredAt
+    ? new Date(order.deliveredAt).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })
+    : '';
+
   return (
     <View style={styles.flex}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
@@ -28,47 +119,61 @@ export function OrderDetailsScreen({ navigation }: Props) {
           <View style={styles.headerTitleWrap}>
             <Text style={styles.headerTitle}>Order Details</Text>
             <Text style={styles.headerSubtitle}>
-              {activeOrder.id} · {activeOrder.date}
+              {order.orderNumber} · {placedDate.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
             </Text>
           </View>
-          <View style={styles.statusPill}>
-            <View style={styles.statusDot} />
-            <Text style={styles.statusPillText}>Out for delivery</Text>
+          <View style={[styles.statusPill, isCancelledLike && styles.statusPillCancelled]}>
+            <View style={[styles.statusDot, isCancelledLike && styles.statusDotCancelled]} />
+            <Text style={[styles.statusPillText, isCancelledLike && styles.statusPillTextCancelled]}>
+              {STATUS_LABELS[order.status]}
+            </Text>
           </View>
         </View>
       </SafeAreaView>
 
       <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
-        <View style={styles.trackerSection}>
-          <OrderProgressTracker activeIndex={3} />
-          <Text style={styles.etaText}>
-            Arriving in <Text style={styles.etaBold}>{activeOrder.eta} mins</Text> · By {activeOrder.etaBy}
-          </Text>
-        </View>
+        {!isCancelledLike ? (
+          <>
+            <View style={styles.trackerSection}>
+              <OrderProgressTracker activeIndex={activeIndex} />
+              <Text style={styles.etaText}>
+                {isDelivered ? (
+                  `Delivered${deliveredDateText ? ` on ${deliveredDateText}` : ''}`
+                ) : (
+                  <>
+                    Arriving in <Text style={styles.etaBold}>{etaMinutes} mins</Text> · By {etaByText}
+                  </>
+                )}
+              </Text>
+            </View>
 
-        <View style={styles.divider} />
+            <View style={styles.divider} />
+          </>
+        ) : null}
 
         <View style={styles.body}>
           <View style={styles.card}>
             <View style={styles.itemsHeaderRow}>
-              <Text style={styles.itemsHeaderTitle}>{activeOrder.items.length} Items</Text>
+              <Text style={styles.itemsHeaderTitle}>{order.items.length} Items</Text>
               <Pressable onPress={() => navigation.navigate('Cart')}>
                 <Text style={styles.editCartLink}>Edit cart</Text>
               </Pressable>
             </View>
-            {activeOrder.items.map((item, index) => (
+            {order.items.map((item, index) => (
               <View
-                key={item.id}
-                style={[styles.itemRow, index === activeOrder.items.length - 1 && styles.itemRowLast]}
+                key={`${item.productId}-${item.variantId}`}
+                style={[styles.itemRow, index === order.items.length - 1 && styles.itemRowLast]}
               >
                 <View style={[styles.itemImageWrap, { backgroundColor: index === 0 ? '#FFF7ED' : '#FEF9C3' }]}>
-                  <Image source={item.image} style={styles.itemImage} resizeMode="contain" />
+                  <Image source={resolveProductImage(item.imageUrl)} style={styles.itemImage} resizeMode="contain" />
                 </View>
                 <View style={styles.itemInfo}>
                   <Text style={styles.itemName}>{item.name}</Text>
-                  <Text style={styles.itemSubtitle}>{item.subtitle}</Text>
+                  <Text style={styles.itemSubtitle}>
+                    {item.variantLabel} × {item.quantity}
+                  </Text>
                 </View>
-                <Text style={styles.itemPrice}>₹{item.price}</Text>
+                <Text style={styles.itemPrice}>₹{item.subtotal}</Text>
               </View>
             ))}
           </View>
@@ -78,32 +183,34 @@ export function OrderDetailsScreen({ navigation }: Props) {
               <Text style={styles.cardHeaderTitle}>Bill summary</Text>
             </View>
             <View style={styles.billBody}>
-              <BillRow label="Item total" value={`₹${activeOrder.itemTotal}`} />
-              <BillRow label="Item discount" value={`-₹${activeOrder.itemDiscount}`} valueColor="#1CA672" />
-              {activeOrder.couponCode ? (
+              <BillRow label="Item total" value={`₹${order.pricing.itemsTotal}`} />
+              {itemDiscount > 0 ? <BillRow label="Item discount" value={`-₹${itemDiscount}`} valueColor="#1CA672" /> : null}
+              {order.couponCode ? (
                 <BillRow
-                  label={`Coupon ${activeOrder.couponCode}`}
-                  value={`-₹${activeOrder.couponDiscount}`}
+                  label={`Coupon ${order.couponCode}`}
+                  value={`-₹${order.pricing.discount}`}
                   valueColor="#1CA672"
                 />
               ) : null}
               <BillRow
                 label="Delivery fee"
-                value={activeOrder.deliveryFee === 0 ? 'FREE' : `₹${activeOrder.deliveryFee}`}
+                value={order.pricing.deliveryFee === 0 ? 'FREE' : `₹${order.pricing.deliveryFee}`}
                 valueColor="#1CA672"
               />
-              <BillRow label="Platform fee" value={`₹${activeOrder.platformFee}`} labelColor="#9CA3AF" />
+              <BillRow label="Platform fee" value={`₹${order.pricing.platformFee}`} labelColor="#9CA3AF" />
               <View style={styles.totalRow}>
                 <Text style={styles.totalLabel}>Total paid</Text>
-                <Text style={styles.totalValue}>₹{activeOrder.total}</Text>
+                <Text style={styles.totalValue}>₹{order.pricing.grandTotal}</Text>
               </View>
             </View>
-            <View style={styles.savingsBannerWrap}>
-              <View style={styles.savingsBanner}>
-                <Text style={styles.savingsEmoji}>🎉</Text>
-                <Text style={styles.savingsText}>You saved ₹{activeOrder.savings} on this order!</Text>
+            {savings > 0 ? (
+              <View style={styles.savingsBannerWrap}>
+                <View style={styles.savingsBanner}>
+                  <Text style={styles.savingsEmoji}>🎉</Text>
+                  <Text style={styles.savingsText}>You saved ₹{savings} on this order!</Text>
+                </View>
               </View>
-            </View>
+            ) : null}
           </View>
 
           <View style={styles.card}>
@@ -115,50 +222,41 @@ export function OrderDetailsScreen({ navigation }: Props) {
                 <Text style={styles.cardHeaderTitle}>Delivery address</Text>
               </View>
               <View style={styles.homeTag}>
-                <Text style={styles.homeTagText}>🏠 {activeOrder.address.label}</Text>
+                <Text style={styles.homeTagText}>Delivery</Text>
               </View>
             </View>
             <View style={styles.addressBody}>
-              <Text style={styles.addressName}>{activeOrder.address.name}</Text>
-              <Text style={styles.addressLine}>{activeOrder.address.line1}</Text>
-              <Text style={styles.addressLine}>{activeOrder.address.line2}</Text>
+              <Text style={styles.addressName}>{order.address.contactName}</Text>
+              <Text style={styles.addressLine}>{order.address.line1}</Text>
+              <Text style={styles.addressLine}>
+                {[order.address.line2, order.address.city, `${order.address.state} – ${order.address.pincode}`]
+                  .filter(Boolean)
+                  .join(', ')}
+              </Text>
             </View>
           </View>
 
           <Pressable
             style={styles.card}
-            onPress={() =>
-              Alert.alert(
-                'Payment details',
-                `${activeOrder.payment.method} · ${activeOrder.payment.account}\nTransaction ID: ${activeOrder.payment.transactionId}\nAmount paid: ₹${activeOrder.total}`,
-              )
-            }
+            onPress={() => Alert.alert('Payment details', `Cash on Delivery\nAmount due: ₹${order.pricing.grandTotal}`)}
           >
             <View style={styles.cardHeaderRow}>
               <Text style={styles.cardHeaderTitle}>Payment</Text>
             </View>
             <View style={styles.paymentBody}>
               <View style={styles.paymentRow}>
-                <View style={styles.paymentIconWrap}>
-                  <Image source={gpayIconSmall} style={styles.paymentIconImage} resizeMode="contain" />
-                </View>
                 <View style={styles.paymentInfo}>
-                  <Text style={styles.paymentMethod}>{activeOrder.payment.method}</Text>
-                  <Text style={styles.paymentAccount}>{activeOrder.payment.account}</Text>
+                  <Text style={styles.paymentMethod}>Cash on Delivery</Text>
+                  <Text style={styles.paymentAccount}>Pay at your doorstep</Text>
                 </View>
-                <Text style={styles.paymentAmount}>₹{activeOrder.total}</Text>
-              </View>
-              <View style={styles.transactionRow}>
-                <Text style={styles.transactionText}>
-                  Transaction ID: <Text style={styles.transactionValue}>{activeOrder.payment.transactionId}</Text>
-                </Text>
+                <Text style={styles.paymentAmount}>₹{order.pricing.grandTotal}</Text>
               </View>
             </View>
           </Pressable>
 
           <Pressable
             style={styles.reorderButton}
-            onPress={() => navigation.navigate('Reorder', { orderId: activeOrder.id })}
+            onPress={() => navigation.navigate('Reorder', { orderId: order.id })}
           >
             <ReorderIcon width={16} height={16} />
             <Text style={styles.reorderButtonText}>Reorder All Items</Text>
@@ -169,7 +267,7 @@ export function OrderDetailsScreen({ navigation }: Props) {
               style={styles.invoiceButton}
               onPress={() =>
                 Share.share({
-                  message: `Verdant Invoice — Order #${activeOrder.id}\nTotal: ₹${activeOrder.total}\nPayment: ${activeOrder.payment.method}\nTransaction ID: ${activeOrder.payment.transactionId}`,
+                  message: `Verdant Invoice — Order #${order.orderNumber}\nTotal: ₹${order.pricing.grandTotal}\nPayment: Cash on Delivery`,
                 }).catch(() => {})
               }
             >
@@ -182,9 +280,14 @@ export function OrderDetailsScreen({ navigation }: Props) {
             </Pressable>
           </View>
 
-          <Pressable style={styles.cancelLinkWrap} onPress={() => navigation.navigate('CancelOrder')}>
-            <Text style={styles.cancelLink}>Cancel order</Text>
-          </Pressable>
+          {isCancellable ? (
+            <Pressable
+              style={styles.cancelLinkWrap}
+              onPress={() => navigation.navigate('CancelOrder', { orderId: order.id })}
+            >
+              <Text style={styles.cancelLink}>Cancel order</Text>
+            </Pressable>
+          ) : null}
         </View>
       </ScrollView>
     </View>
@@ -232,6 +335,7 @@ const billStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#F5F5F5' },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F5F5' },
   headerSafe: {
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
@@ -277,16 +381,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
+  statusPillCancelled: {
+    backgroundColor: '#FFF1F2',
+    borderColor: '#FECDD3',
+  },
   statusDot: {
     width: 7,
     height: 7,
     borderRadius: 3.5,
     backgroundColor: '#1CA672',
   },
+  statusDotCancelled: {
+    backgroundColor: '#EF4444',
+  },
   statusPillText: {
     fontSize: 11,
     fontWeight: '700',
     color: '#1CA672',
+  },
+  statusPillTextCancelled: {
+    color: '#EF4444',
   },
   trackerSection: {
     backgroundColor: '#FFFFFF',

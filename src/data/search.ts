@@ -1,3 +1,4 @@
+import type { ImageSourcePropType } from 'react-native';
 import * as cartImg from '../assets/images/cart';
 import * as homeImg from '../assets/images/home';
 import * as orderImg from '../assets/images/order';
@@ -5,7 +6,7 @@ import * as searchImg from '../assets/images/search';
 
 export interface SearchProduct {
   id: string;
-  image: number;
+  image: ImageSourcePropType;
   title: string;
   weight: string;
   category: string;

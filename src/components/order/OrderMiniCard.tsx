@@ -1,23 +1,39 @@
 import React from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, ImageSourcePropType, StyleSheet, Text, View } from 'react-native';
 import { besan, fortuneThumb, reorderMilk } from '../../assets/images/order';
 import { activeOrder } from '../../data/orders';
 
-const THUMBS = [fortuneThumb, besan, reorderMilk];
+const DEFAULT_THUMBS = [fortuneThumb, besan, reorderMilk];
 
-export function OrderMiniCard() {
+interface OrderMiniCardProps {
+  orderNumber?: string;
+  date?: string;
+  itemCount?: number;
+  total?: number;
+  thumbs?: ImageSourcePropType[];
+}
+
+export function OrderMiniCard({ orderNumber, date, itemCount, total, thumbs }: OrderMiniCardProps) {
+  const displayId = orderNumber ?? activeOrder.id;
+  const displayDate = date ?? activeOrder.date;
+  const displayCount = itemCount ?? 6;
+  const displayTotal = total ?? 477;
+  const displayThumbs = thumbs ?? DEFAULT_THUMBS;
+
   return (
     <View style={styles.card}>
       <View style={styles.thumbsRow}>
-        {THUMBS.map((thumb, index) => (
+        {displayThumbs.map((thumb, index) => (
           <Image key={index} source={thumb} style={[styles.thumb, index > 0 && styles.thumbOverlap]} />
         ))}
       </View>
       <View style={styles.info}>
-        <Text style={styles.orderId}>{activeOrder.id}</Text>
-        <Text style={styles.orderMeta}>6 items · {activeOrder.date}</Text>
+        <Text style={styles.orderId}>{displayId}</Text>
+        <Text style={styles.orderMeta}>
+          {displayCount} items · {displayDate}
+        </Text>
       </View>
-      <Text style={styles.orderTotal}>₹477</Text>
+      <Text style={styles.orderTotal}>₹{displayTotal}</Text>
     </View>
   );
 }

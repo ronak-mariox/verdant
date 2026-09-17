@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   Pressable,
   ScrollView,
@@ -28,50 +29,137 @@ import {
   StarBold,
   StarIcon,
 } from '../assets/icons/product';
-import {
-  brandIcon,
-  cartPillThumb1,
-  cartPillThumb2,
-  cartPillThumb3,
-  hero,
-  seeAllThumb1,
-  seeAllThumb2,
-  seeAllThumb3,
-} from '../assets/images/product';
+import { brandIcon, seeAllThumb1, seeAllThumb2, seeAllThumb3 } from '../assets/images/product';
 import { ProductDetailsAccordion } from '../components/product/ProductDetailsAccordion';
 import { SimilarProductCard } from '../components/product/SimilarProductCard';
 import { useCart } from '../context/CartContext';
-import { similarProductsRow1, similarProductsRow2, variants as variantData } from '../data/product';
+import type { SimilarProduct, Variant } from '../data/product';
 import type { AuthStackParamList } from '../navigation/types';
+import { api } from '../services/api';
+import { resolveProductImage } from '../utils/productImage';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'ProductDetail'>;
 
-export function ProductDetailScreen({ navigation }: Props) {
-  const [selectedVariant, setSelectedVariant] = useState(
-    variantData.find((v) => v.selected)?.id ?? variantData[0].id,
-  );
+interface RawVariant {
+  id: string;
+  label: string;
+  mrp: number;
+  price: number;
+  stock: number;
+  sku?: string;
+}
+
+interface RawProduct {
+  id: string;
+  vendorId: string;
+  categoryId: string;
+  subcategoryId?: string;
+  name: string;
+  description?: string;
+  brand?: string;
+  unit?: string;
+  images: string[];
+  variants: RawVariant[];
+  tags: string[];
+  taxRate: number;
+  status: string;
+  isAvailable: boolean;
+}
+
+interface ProductDetailResponse {
+  product: RawProduct;
+  similar: RawProduct[];
+}
+
+function toSimilarDisplay(product: RawProduct): SimilarProduct {
+  const variant = product.variants[0];
+  const discountPercent =
+    variant && variant.mrp > 0 ? Math.round(((variant.mrp - variant.price) / variant.mrp) * 100) : 0;
+  return {
+    id: product.id,
+    image: resolveProductImage(product.images[0]),
+    brand: product.brand ?? '',
+    name: product.name,
+    weight: product.unit ?? variant?.label ?? '',
+    pricePerUnit: '',
+    price: variant?.price ?? 0,
+    mrp: variant?.mrp ?? 0,
+    discountLabel: discountPercent > 0 ? `${discountPercent}% OFF on MRP` : '',
+    rating: '★★★★☆',
+    reviews: '',
+    deliveryTime: '10 mins',
+  };
+}
+
+export function ProductDetailScreen({ navigation, route }: Props) {
+  const productId = route.params?.productId;
+  const [data, setData] = useState<ProductDetailResponse | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [isWishlisted, setIsWishlisted] = useState(false);
-  const { itemCount, addItem } = useCart();
+  const { itemCount, items, addItem } = useCart();
+  const cartThumbItems = items.slice(0, 3);
+
+  useEffect(() => {
+    if (!productId) {
+      setLoadError(true);
+      return;
+    }
+    setData(null);
+    setLoadError(false);
+    setSelectedVariantId(null);
+    setQuantity(1);
+    api
+      .get<ProductDetailResponse>(`/customer/products/${productId}`)
+      .then(({ data }) => {
+        setData(data);
+        setSelectedVariantId(data.product.variants[0]?.id ?? null);
+      })
+      .catch(() => setLoadError(true));
+  }, [productId]);
+
+  if (loadError) {
+    return (
+      <View style={styles.loadingWrap}>
+        <Text style={styles.title}>Product not found</Text>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
+          <Text style={styles.viewDetailsText}>Go back</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  if (!data) {
+    return (
+      <View style={styles.loadingWrap}>
+        <ActivityIndicator color="#1CA672" size="large" />
+      </View>
+    );
+  }
+
+  const { product, similar } = data;
+  const variantData: Variant[] = product.variants;
+  const selectedVariant = variantData.find((v) => v.id === selectedVariantId) ?? variantData[0];
+  const discountPercent =
+    selectedVariant && selectedVariant.mrp > 0
+      ? Math.round(((selectedVariant.mrp - selectedVariant.price) / selectedVariant.mrp) * 100)
+      : 0;
+  const savings = selectedVariant ? selectedVariant.mrp - selectedVariant.price : 0;
+  const heroImage = resolveProductImage(product.images[0]);
+  const subtitle = product.description || [product.brand, selectedVariant?.label].filter(Boolean).join(' • ');
+  const similarRow1 = similar.slice(0, 3).map(toSimilarDisplay);
+  const similarRow2 = similar.slice(3, 6).map(toSimilarDisplay);
 
   const handleAddToCart = () => {
-    addItem(
-      {
-        id: 'fortune-sunflower-oil',
-        title: 'Fortune Sunflower Oil',
-        subtitle: 'Refined Sunflower Oil • 1 L',
-        price: 149,
-        mrp: 175,
-        image: hero,
-      },
-      quantity,
-    );
+    if (!selectedVariant) return;
+    addItem(product.id, selectedVariant.id, quantity);
   };
 
   const handleShare = () => {
     Share.share({
-      message: 'Check out Fortune Sunflower Oil (Refined Sunflower Oil • 1 L) at ₹149 on Verdant!',
+      message: `Check out ${product.name}${subtitle ? ` (${subtitle})` : ''} at ₹${selectedVariant?.price ?? ''} on Verdant!`,
     }).catch(() => {});
   };
 
@@ -79,15 +167,10 @@ export function ProductDetailScreen({ navigation }: Props) {
     navigation.push('ProductDetail', { productId });
   };
 
-  const addSimilarToCart = (item: (typeof similarProductsRow1)[number]) => {
-    addItem({
-      id: item.id,
-      title: item.name,
-      subtitle: item.weight,
-      price: item.price,
-      mrp: item.mrp,
-      image: item.image,
-    });
+  const addSimilarToCart = (id: string) => {
+    const similarProduct = similar.find((p) => p.id === id);
+    const variant = similarProduct?.variants[0];
+    if (variant) addItem(id, variant.id);
   };
 
   return (
@@ -118,7 +201,7 @@ export function ProductDetailScreen({ navigation }: Props) {
 
       <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
         <View style={styles.heroWrap}>
-          <Image source={hero} style={styles.heroImage} resizeMode="contain" />
+          <Image source={heroImage} style={styles.heroImage} resizeMode="contain" />
           <View style={styles.ratingBadge}>
             <StarBold width={16} height={16} />
             <Text style={styles.ratingBadgeText}>
@@ -146,26 +229,28 @@ export function ProductDetailScreen({ navigation }: Props) {
               </View>
             </View>
 
-            <Text style={styles.title}>Fortune Sunflower Oil</Text>
-            <Text style={styles.subtitle}>Refined Sunflower Oil • 1 L</Text>
+            <Text style={styles.title}>{product.name}</Text>
+            {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
 
             <View style={styles.priceRow}>
-              <Text style={styles.price}>₹149</Text>
-              <Text style={styles.mrp}>₹175</Text>
-              <View style={styles.discountPill}>
-                <Text style={styles.discountPillText}>15% OFF</Text>
-              </View>
+              <Text style={styles.price}>{`₹${selectedVariant?.price ?? 0}`}</Text>
+              <Text style={styles.mrp}>{`₹${selectedVariant?.mrp ?? 0}`}</Text>
+              {discountPercent > 0 ? (
+                <View style={styles.discountPill}>
+                  <Text style={styles.discountPillText}>{`${discountPercent}% OFF`}</Text>
+                </View>
+              ) : null}
             </View>
-            <Text style={styles.savings}>You save ₹26 on this item</Text>
+            {savings > 0 ? <Text style={styles.savings}>{`You save ₹${savings} on this item`}</Text> : null}
 
             <Text style={styles.sectionLabel}>Choose Variant</Text>
             <View style={styles.variantRow}>
               {variantData.map((variant) => {
-                const active = variant.id === selectedVariant;
+                const active = variant.id === selectedVariant?.id;
                 return (
                   <Pressable
                     key={variant.id}
-                    onPress={() => setSelectedVariant(variant.id)}
+                    onPress={() => setSelectedVariantId(variant.id)}
                     style={[styles.variantChip, active && styles.variantChipActive]}
                   >
                     <Text style={styles.variantLabel}>{variant.label}</Text>
@@ -218,7 +303,7 @@ export function ProductDetailScreen({ navigation }: Props) {
                 <Image source={brandIcon} style={styles.brandIconImage} resizeMode="contain" />
               </View>
               <View>
-                <Text style={styles.infoRowTitle}>Fortune</Text>
+                <Text style={styles.infoRowTitle}>{product.brand || 'Brand'}</Text>
                 <Text style={styles.infoRowSubtitle}>Explore all products</Text>
               </View>
             </View>
@@ -228,7 +313,7 @@ export function ProductDetailScreen({ navigation }: Props) {
           </View>
 
           <View style={styles.detailsTeaser}>
-            <Text style={styles.detailsTeaserTitle}>Fortune Sunflower Oil</Text>
+            <Text style={styles.detailsTeaserTitle}>{product.name}</Text>
             <View style={styles.detailsTeaserPill}>
               <Text style={styles.detailsTeaserPillText}>View Details</Text>
             </View>
@@ -247,9 +332,21 @@ export function ProductDetailScreen({ navigation }: Props) {
           </View>
         </View>
 
-        <SimilarProductsBlock onSeeAll={() => navigation.navigate('Home')} onOpenItem={openSimilarProduct} onAddItem={addSimilarToCart} />
+        <SimilarProductsBlock
+          row1={similarRow1}
+          row2={similarRow2}
+          onSeeAll={() => navigation.navigate('Home')}
+          onOpenItem={openSimilarProduct}
+          onAddItem={addSimilarToCart}
+        />
         <SeeAllProductPill onPress={() => navigation.navigate('Home')} />
-        <SimilarProductsBlock onSeeAll={() => navigation.navigate('Home')} onOpenItem={openSimilarProduct} onAddItem={addSimilarToCart} />
+        <SimilarProductsBlock
+          row1={similarRow1}
+          row2={similarRow2}
+          onSeeAll={() => navigation.navigate('Home')}
+          onOpenItem={openSimilarProduct}
+          onAddItem={addSimilarToCart}
+        />
         <SeeAllProductPill onPress={() => navigation.navigate('Home')} />
 
         <View style={styles.bottomSpacer} />
@@ -258,9 +355,19 @@ export function ProductDetailScreen({ navigation }: Props) {
       {itemCount > 0 ? (
         <Pressable style={styles.viewCartPill} onPress={() => navigation.navigate('Cart')}>
           <View style={styles.viewCartThumbs}>
-            <Image source={cartPillThumb3} style={[styles.viewCartThumb, styles.viewCartThumb3]} />
-            <Image source={cartPillThumb2} style={[styles.viewCartThumb, styles.viewCartThumb2]} />
-            <Image source={cartPillThumb1} style={[styles.viewCartThumb, styles.viewCartThumb1]} />
+            {cartThumbItems
+              .map((item, index) => ({ item, index }))
+              .reverse()
+              .map(({ item, index }) => (
+                <Image
+                  key={item.id}
+                  source={item.image}
+                  style={[
+                    styles.viewCartThumb,
+                    index === 0 ? styles.viewCartThumb1 : index === 1 ? styles.viewCartThumb2 : styles.viewCartThumb3,
+                  ]}
+                />
+              ))}
           </View>
           <Text style={styles.viewCartText}>View cart</Text>
           <View style={styles.viewCartIconWrap}>
@@ -277,15 +384,15 @@ export function ProductDetailScreen({ navigation }: Props) {
         <View style={styles.stickyBar}>
           <View>
             <View style={styles.stickyBadge}>
-              <Text style={styles.stickyBadgeText}>1 Litter</Text>
+              <Text style={styles.stickyBadgeText}>{selectedVariant?.label ?? ''}</Text>
             </View>
             <View style={styles.stickyPriceRow}>
-              <Text style={styles.stickyPrice}>₹149</Text>
+              <Text style={styles.stickyPrice}>{`₹${selectedVariant?.price ?? 0}`}</Text>
               <Text style={styles.stickyMrpLabel}>
-                MRP <Text style={styles.stickyMrpValue}>₹250</Text>
+                MRP <Text style={styles.stickyMrpValue}>{`₹${selectedVariant?.mrp ?? 0}`}</Text>
               </Text>
             </View>
-            <Text style={styles.stickyOff}>20% Off</Text>
+            {discountPercent > 0 ? <Text style={styles.stickyOff}>{`${discountPercent}% Off`}</Text> : null}
           </View>
           <Pressable style={styles.addToCartButton} onPress={handleAddToCart}>
             <Text style={styles.addToCartText}>Add to cart</Text>
@@ -301,9 +408,9 @@ function SimilarProductsRow({
   onOpenItem,
   onAddItem,
 }: {
-  data: typeof similarProductsRow1;
+  data: SimilarProduct[];
   onOpenItem: (productId: string) => void;
-  onAddItem: (item: (typeof similarProductsRow1)[number]) => void;
+  onAddItem: (id: string) => void;
 }) {
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.similarList}>
@@ -312,7 +419,7 @@ function SimilarProductsRow({
           key={item.id}
           item={item}
           onPress={() => onOpenItem(item.id)}
-          onAdd={() => onAddItem(item)}
+          onAdd={() => onAddItem(item.id)}
         />
       ))}
     </ScrollView>
@@ -320,13 +427,17 @@ function SimilarProductsRow({
 }
 
 function SimilarProductsBlock({
+  row1,
+  row2,
   onSeeAll,
   onOpenItem,
   onAddItem,
 }: {
+  row1: SimilarProduct[];
+  row2: SimilarProduct[];
   onSeeAll: () => void;
   onOpenItem: (productId: string) => void;
-  onAddItem: (item: (typeof similarProductsRow1)[number]) => void;
+  onAddItem: (id: string) => void;
 }) {
   return (
     <View style={styles.similarSection}>
@@ -336,8 +447,8 @@ function SimilarProductsBlock({
           <Text style={styles.similarSeeAll}>See all</Text>
         </Pressable>
       </View>
-      <SimilarProductsRow data={similarProductsRow1} onOpenItem={onOpenItem} onAddItem={onAddItem} />
-      <SimilarProductsRow data={similarProductsRow2} onOpenItem={onOpenItem} onAddItem={onAddItem} />
+      <SimilarProductsRow data={row1} onOpenItem={onOpenItem} onAddItem={onAddItem} />
+      <SimilarProductsRow data={row2} onOpenItem={onOpenItem} onAddItem={onAddItem} />
     </View>
   );
 }
@@ -360,6 +471,7 @@ function SeeAllProductPill({ onPress }: { onPress: () => void }) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#FFFFFF' },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
   headerSafe: { backgroundColor: '#FFFFFF' },
   headerRow: {
     flexDirection: 'row',

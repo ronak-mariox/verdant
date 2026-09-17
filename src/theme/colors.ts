@@ -52,6 +52,7 @@ export const colors = {
     permissionOrb: ['#F0FDF4', '#DCFCE7'] as const,
     notFoundMap: ['#FEF9C3', '#FEF3C7'] as const,
     earlyAccess: ['#F0FDF4', '#DCFCE7'] as const,
+    categoryBanner: ['#16A34A', '#15803D'] as const,
   },
   overlay: {
     whiteFaint: 'rgba(255,255,255,0.15)',

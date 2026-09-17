@@ -1,14 +1,29 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CheckIcon, TrackIcon } from '../assets/icons/order';
-import { activeOrder } from '../data/orders';
+import { api } from '../services/api';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'OrderCancelled'>;
 
-export function OrderCancelledScreen({ navigation }: Props) {
+interface RawOrder {
+  id: string;
+  orderNumber: string;
+  pricing: { grandTotal: number };
+  paymentMethod: 'cod' | 'online';
+}
+
+export function OrderCancelledScreen({ navigation, route }: Props) {
+  const orderId = route.params?.orderId;
+  const [order, setOrder] = useState<RawOrder | null>(null);
+
+  useEffect(() => {
+    if (!orderId) return;
+    api.get<RawOrder>(`/customer/orders/${orderId}`).then(({ data }) => setOrder(data));
+  }, [orderId]);
+
   return (
     <View style={styles.flex}>
       <StatusBar barStyle="light-content" backgroundColor="#1E293B" />
@@ -21,15 +36,15 @@ export function OrderCancelledScreen({ navigation }: Props) {
               <CheckIcon width={34} height={34} />
             </View>
             <Text style={styles.heroTitle}>Order Cancelled</Text>
-            <Text style={styles.heroSubtitle}>{activeOrder.id}</Text>
+            <Text style={styles.heroSubtitle}>{order?.orderNumber ?? 'Your order'}</Text>
             <View style={styles.heroChipsRow}>
               <View style={styles.heroChip}>
-                <Text style={styles.heroChipLabel}>REFUND AMOUNT</Text>
-                <Text style={styles.heroChipValueGreen}>₹477</Text>
+                <Text style={styles.heroChipLabel}>AMOUNT CHARGED</Text>
+                <Text style={styles.heroChipValueGreen}>₹0</Text>
               </View>
               <View style={styles.heroChip}>
-                <Text style={styles.heroChipLabel}>TIMELINE</Text>
-                <Text style={styles.heroChipValue}>5–7 business days</Text>
+                <Text style={styles.heroChipLabel}>PAYMENT</Text>
+                <Text style={styles.heroChipValue}>Cash on Delivery</Text>
               </View>
             </View>
           </View>
@@ -38,14 +53,12 @@ export function OrderCancelledScreen({ navigation }: Props) {
         <View style={styles.body}>
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Refund details</Text>
-            <RefundRow label="Refund to" value={activeOrder.payment.method} />
-            <RefundRow label="UPI ID" value={activeOrder.payment.account} />
-            <RefundRow label="Amount" value={`₹477`} />
-            <RefundRow label="Reference" value={activeOrder.payment.transactionId} />
-            <RefundRow label="Expected by" value="11 Sep 2026" last />
+            <RefundRow label="Payment method" value="Cash on Delivery" />
+            <RefundRow label="Amount charged" value="₹0" />
+            <RefundRow label="Refund needed" value="None" last />
             <View style={styles.infoBanner}>
               <Text style={styles.infoBannerText}>
-                Refunds to UPI usually arrive within 5–7 business days. Bank delays are rare but possible.
+                This order was Cash on Delivery, so no payment was ever collected — there&apos;s nothing to refund.
               </Text>
             </View>
           </View>

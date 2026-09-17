@@ -1,20 +1,108 @@
-import React from 'react';
-import { Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ChevronDownIcon, HelpIcon, IssueWarningIcon } from '../assets/icons/order';
 import { map } from '../assets/images/order';
 import { DeliveryPartnerCard } from '../components/order/DeliveryPartnerCard';
 import { OrderProgressTracker } from '../components/order/OrderProgressTracker';
-import { activeOrder } from '../data/orders';
+import { api } from '../services/api';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'OrderTracking'>;
 
+type BackendStatus =
+  | 'placed'
+  | 'accepted'
+  | 'preparing'
+  | 'ready_for_pickup'
+  | 'out_for_delivery'
+  | 'delivered'
+  | 'cancelled'
+  | 'rejected';
+
+interface RawOrder {
+  id: string;
+  orderNumber: string;
+  items: { productId: string; variantId: string }[];
+  pricing: { grandTotal: number };
+  status: BackendStatus;
+  placedAt: string;
+  driverId?: string | null;
+}
+
+const STATUS_LABELS: Record<BackendStatus, string> = {
+  placed: 'Order placed',
+  accepted: 'Accepted',
+  preparing: 'Preparing',
+  ready_for_pickup: 'Ready for pickup',
+  out_for_delivery: 'Out for delivery',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+  rejected: 'Rejected',
+};
+
+const STATUS_INDEX: Partial<Record<BackendStatus, number>> = {
+  placed: 0,
+  accepted: 1,
+  preparing: 1,
+  ready_for_pickup: 2,
+  out_for_delivery: 3,
+  delivered: 4,
+};
+
 export function OrderTrackingScreen({ navigation, route }: Props) {
+  const paramOrderId = route.params?.orderId;
   const variant = route.params?.variant ?? 'onTime';
   const isDelayed = variant === 'delayed';
   const accent = isDelayed ? '#F59E0B' : '#1CA672';
+
+  const [order, setOrder] = useState<RawOrder | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        if (paramOrderId) {
+          const { data } = await api.get<RawOrder>(`/customer/orders/${paramOrderId}`);
+          if (!cancelled) setOrder(data);
+        } else {
+          const { data } = await api.get<RawOrder[]>('/customer/orders');
+          if (!cancelled) setOrder(data[0] ?? null);
+        }
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [paramOrderId]);
+
+  if (!loaded) {
+    return (
+      <View style={styles.loadingWrap}>
+        <ActivityIndicator color="#1CA672" size="large" />
+      </View>
+    );
+  }
+
+  if (!order) {
+    return (
+      <View style={styles.loadingWrap}>
+        <Text style={styles.emptyText}>No orders to track yet.</Text>
+      </View>
+    );
+  }
+
+  const activeIndex = order.status === 'delivered' ? 4 : STATUS_INDEX[order.status] ?? 0;
+  const placedDate = new Date(order.placedAt);
+  const etaDate = new Date(placedDate.getTime() + 20 * 60 * 1000);
+  const etaMinutes = Math.max(0, Math.round((etaDate.getTime() - Date.now()) / 60000));
+  const etaByText = etaDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const shortDateText = placedDate.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
 
   return (
     <View style={styles.flex}>
@@ -36,17 +124,17 @@ export function OrderTrackingScreen({ navigation, route }: Props) {
               <View>
                 <Text style={styles.arrivingLabel}>ARRIVING IN</Text>
                 <View style={styles.etaRow}>
-                  <Text style={[styles.etaValue, { color: accent }]}>{activeOrder.eta}</Text>
+                  <Text style={[styles.etaValue, { color: accent }]}>{etaMinutes}</Text>
                   <Text style={[styles.etaUnit, { color: accent }]}>mins</Text>
                 </View>
-                <Text style={styles.etaBy}>By {activeOrder.etaBy} · {activeOrder.shortDate}</Text>
+                <Text style={styles.etaBy}>By {etaByText} · {shortDateText}</Text>
               </View>
               <View style={styles.headerRight}>
                 <View style={styles.statusPill}>
                   <View style={styles.statusDot} />
-                  <Text style={styles.statusPillText}>Out for delivery</Text>
+                  <Text style={styles.statusPillText}>{STATUS_LABELS[order.status]}</Text>
                 </View>
-                <Text style={styles.orderIdLink}>Order {activeOrder.id} →</Text>
+                <Text style={styles.orderIdLink}>Order {order.orderNumber} →</Text>
               </View>
             </View>
           )}
@@ -62,7 +150,7 @@ export function OrderTrackingScreen({ navigation, route }: Props) {
         </View>
 
         <View style={styles.trackerSection}>
-          <OrderProgressTracker activeIndex={3} color={accent} />
+          <OrderProgressTracker activeIndex={activeIndex} color={accent} />
           {isDelayed ? (
             <Text style={styles.delayedEta}>~28 mins away · Updated 2:43 PM</Text>
           ) : (
@@ -75,22 +163,28 @@ export function OrderTrackingScreen({ navigation, route }: Props) {
 
         <View style={styles.divider} />
 
-        <View style={styles.partnerSection}>
-          <Text style={styles.sectionLabel}>DELIVERY PARTNER</Text>
-          <View style={styles.partnerCardWrap}>
-            <DeliveryPartnerCard onChatPress={() => navigation.navigate('SupportHome')} />
-          </View>
-        </View>
+        {order.driverId ? (
+          <>
+            <View style={styles.partnerSection}>
+              <Text style={styles.sectionLabel}>DELIVERY PARTNER</Text>
+              <View style={styles.partnerCardWrap}>
+                <DeliveryPartnerCard onChatPress={() => navigation.navigate('SupportHome')} />
+              </View>
+            </View>
 
-        <View style={styles.divider} />
+            <View style={styles.divider} />
+          </>
+        ) : null}
 
         <Pressable
           style={styles.summaryRow}
-          onPress={() => navigation.navigate('OrderDetails', { orderId: activeOrder.id })}
+          onPress={() => navigation.navigate('OrderDetails', { orderId: order.id })}
         >
           <View style={styles.summaryLeft}>
             <Text style={styles.summaryTitle}>Order summary</Text>
-            <Text style={styles.summarySubtitle}>(6 items · ₹477)</Text>
+            <Text style={styles.summarySubtitle}>
+              ({order.items.length} items · ₹{order.pricing.grandTotal})
+            </Text>
           </View>
           <ChevronDownIcon width={16} height={16} />
         </Pressable>
@@ -102,7 +196,10 @@ export function OrderTrackingScreen({ navigation, route }: Props) {
             <Pressable style={styles.contactSupportButton} onPress={() => navigation.navigate('SupportHome')}>
               <Text style={styles.contactSupportText}>Contact Support</Text>
             </Pressable>
-            <Pressable style={styles.cancelLinkWrap} onPress={() => navigation.navigate('CancelOrder')}>
+            <Pressable
+              style={styles.cancelLinkWrap}
+              onPress={() => navigation.navigate('CancelOrder', { orderId: order.id })}
+            >
               <Text style={styles.cancelLink}>Cancel order</Text>
             </Pressable>
           </View>
@@ -117,7 +214,10 @@ export function OrderTrackingScreen({ navigation, route }: Props) {
                 <Text style={styles.helpSubtitle}>Chat or call our support team</Text>
               </View>
             </Pressable>
-            <Pressable style={styles.cancelLinkWrap} onPress={() => navigation.navigate('CancelOrder')}>
+            <Pressable
+              style={styles.cancelLinkWrap}
+              onPress={() => navigation.navigate('CancelOrder', { orderId: order.id })}
+            >
               <Text style={styles.cancelLink}>Cancel order</Text>
             </Pressable>
           </View>
@@ -129,6 +229,8 @@ export function OrderTrackingScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#F5F5F5' },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F5F5' },
+  emptyText: { fontSize: 14, color: '#6B7280', textAlign: 'center', paddingHorizontal: 32 },
   headerSafe: {
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,

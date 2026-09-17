@@ -1,20 +1,19 @@
 import React, { useMemo } from 'react';
-import { Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CouponCheck, DeliveryPin } from '../assets/icons/checkout';
 import { CheckoutHeader } from '../components/checkout/CheckoutHeader';
 import { useCart } from '../context/CartContext';
 import { useCheckout } from '../context/CheckoutContext';
-import { DELIVERY_FEE, PLATFORM_FEE } from '../data/cart';
 import { paymentMethods } from '../data/checkout';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'ReviewOrder'>;
 
 export function ReviewOrderScreen({ navigation }: Props) {
-  const { items } = useCart();
-  const { addressList, selectedAddressId, paymentMethod, couponApplied } = useCheckout();
+  const { items, pricing, couponCode } = useCart();
+  const { addressList, selectedAddressId, paymentMethod } = useCheckout();
 
   const address = addressList.find((a) => a.id === selectedAddressId) ?? addressList[0];
   const method = paymentMethods.find((m) => m.id === paymentMethod);
@@ -24,9 +23,26 @@ export function ReviewOrderScreen({ navigation }: Props) {
     () => items.reduce((sum, i) => sum + ((i.mrp ?? i.price) - i.price) * i.quantity, 0),
     [items],
   );
-  const couponDiscount = couponApplied ? 50 : 0;
-  const toPay = Math.max(0, itemTotal - productDiscount - couponDiscount + DELIVERY_FEE + PLATFORM_FEE);
+  const deliveryFee = pricing?.deliveryFee ?? 0;
+  const platformFee = pricing?.platformFee ?? 0;
+  const couponDiscount = pricing?.discount ?? 0;
+  const toPay = pricing?.grandTotal ?? 0;
   const totalSavings = productDiscount + couponDiscount;
+
+  const handlePlaceOrder = () => {
+    if (!address) {
+      Alert.alert('Add a delivery address', 'Please add a delivery address before placing your order.');
+      return;
+    }
+    if (paymentMethod !== 'cod') {
+      Alert.alert(
+        'Online payments coming soon',
+        'Only Cash on Delivery is supported right now — please switch your payment method to continue.',
+      );
+      return;
+    }
+    navigation.navigate('Processing');
+  };
 
   return (
     <View style={styles.flex}>
@@ -45,10 +61,14 @@ export function ReviewOrderScreen({ navigation }: Props) {
             </Pressable>
           </View>
           <Text style={styles.addressName}>
-            {address.type} · {address.name}
+            {address ? `${address.type} · ${address.name}` : 'No address selected'}
           </Text>
-          <Text style={styles.addressLine}>{address.line1}</Text>
-          <Text style={styles.addressLine}>{address.line2}</Text>
+          {address ? (
+            <>
+              <Text style={styles.addressLine}>{address.line1}</Text>
+              <Text style={styles.addressLine}>{address.line2}</Text>
+            </>
+          ) : null}
         </View>
 
         <View style={styles.card}>
@@ -83,11 +103,11 @@ export function ReviewOrderScreen({ navigation }: Props) {
           <Text style={styles.paymentSubtitle}>{method?.subtitle}</Text>
         </View>
 
-        {couponApplied ? (
+        {couponCode ? (
           <View style={[styles.card, styles.couponCard]}>
             <CouponCheck width={18} height={18} />
             <View style={styles.couponBody}>
-              <Text style={styles.couponCode}>{couponApplied} applied</Text>
+              <Text style={styles.couponCode}>{couponCode} applied</Text>
               <Text style={styles.couponHint}>You saved ₹{couponDiscount} with this coupon</Text>
             </View>
           </View>
@@ -97,9 +117,9 @@ export function ReviewOrderScreen({ navigation }: Props) {
           <Text style={styles.cardTitle}>Bill Summary</Text>
           <BillRow label="Item total (MRP)" value={`₹${itemTotal}`} />
           <BillRow label="Product discount" value={`−₹${productDiscount}`} valueColor="#1CA672" />
-          {couponApplied ? <BillRow label="Coupon discount" value={`−₹${couponDiscount}`} valueColor="#1CA672" /> : null}
-          <BillRow label="Delivery fee" value={`₹${DELIVERY_FEE}`} labelColor="#9CA3AF" />
-          <BillRow label="Platform fee" value={`₹${PLATFORM_FEE}`} labelColor="#9CA3AF" />
+          {couponCode ? <BillRow label="Coupon discount" value={`−₹${couponDiscount}`} valueColor="#1CA672" /> : null}
+          <BillRow label="Delivery fee" value={deliveryFee > 0 ? `₹${deliveryFee}` : 'FREE'} labelColor="#9CA3AF" />
+          <BillRow label="Platform fee" value={`₹${platformFee}`} labelColor="#9CA3AF" />
           <View style={styles.billDividerLine} />
           <BillRow label="Total" value={`₹${toPay}`} bold />
         </View>
@@ -120,7 +140,7 @@ export function ReviewOrderScreen({ navigation }: Props) {
 
       <SafeAreaView edges={['bottom']} style={styles.footerSafe}>
         <View style={styles.footer}>
-          <Pressable style={styles.placeOrderButton} onPress={() => navigation.navigate('Processing')}>
+          <Pressable style={styles.placeOrderButton} onPress={handlePlaceOrder}>
             <Text style={styles.placeOrderButtonText}>Place Order · ₹{toPay}</Text>
           </Pressable>
         </View>

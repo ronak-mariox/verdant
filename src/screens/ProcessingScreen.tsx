@@ -3,15 +3,19 @@ import { Animated, Easing, StatusBar, StyleSheet, Text, View } from 'react-nativ
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CheckSmall, ProcessingIcon } from '../assets/icons/checkout';
 import { useCart } from '../context/CartContext';
+import { useCheckout } from '../context/CheckoutContext';
+import { api, getErrorMessage } from '../services/api';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Processing'>;
 
 const STEPS = ['Verifying payment', 'Confirming order', 'Almost done'];
 const STEP_INTERVAL = 700;
+const MIN_VISIBLE_MS = STEP_INTERVAL * STEPS.length;
 
 export function ProcessingScreen({ navigation }: Props) {
   const { clearCart } = useCart();
+  const { selectedAddressId, instructions } = useCheckout();
   const [activeStep, setActiveStep] = useState(0);
   const spin = useRef(new Animated.Value(0)).current;
 
@@ -29,25 +33,40 @@ export function ProcessingScreen({ navigation }: Props) {
   }, [spin]);
 
   useEffect(() => {
+    let cancelled = false;
     const stepTimer = setInterval(() => {
       setActiveStep((prev) => Math.min(prev + 1, STEPS.length - 1));
     }, STEP_INTERVAL);
 
-    const finishTimer = setTimeout(() => {
-      const succeeded = Math.random() > 0.15;
-      if (succeeded) {
-        clearCart();
-        navigation.reset({ index: 0, routes: [{ name: 'OrderConfirmation' }] });
-      } else {
-        navigation.replace('PaymentFailed');
+    const startedAt = Date.now();
+    (async () => {
+      try {
+        // ReviewOrderScreen already guards the payment method to 'cod' before
+        // navigating here — online gateways aren't wired up yet.
+        const { data } = await api.post<{ id: string }>('/customer/orders', {
+          addressId: selectedAddressId,
+          paymentMethod: 'cod',
+          ...(instructions.trim() && { specialInstructions: instructions.trim() }),
+        });
+        const elapsed = Date.now() - startedAt;
+        if (elapsed < MIN_VISIBLE_MS) {
+          await new Promise<void>((resolve) => setTimeout(resolve, MIN_VISIBLE_MS - elapsed));
+        }
+        if (cancelled) return;
+        await clearCart();
+        navigation.reset({ index: 0, routes: [{ name: 'OrderConfirmation', params: { orderId: data.id } }] });
+      } catch (err) {
+        if (cancelled) return;
+        navigation.replace('PaymentFailed', { message: getErrorMessage(err, 'We could not place your order.') });
       }
-    }, STEP_INTERVAL * STEPS.length + 400);
+    })();
 
     return () => {
+      cancelled = true;
       clearInterval(stepTimer);
-      clearTimeout(finishTimer);
     };
-  }, [clearCart, navigation]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 

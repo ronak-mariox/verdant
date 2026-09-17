@@ -1,8 +1,9 @@
+import type { ImageSourcePropType } from 'react-native';
 import * as img from '../assets/images/home';
 
 export interface ProductItem {
   id: string;
-  image: number;
+  image: ImageSourcePropType;
   title: string;
   weight: string;
   rating?: number;
@@ -39,6 +40,25 @@ export const categoryTabs: CategoryTab[] = [
 export const featuredPicks = [
   img.featured1, img.featured2, img.featured3, img.featured4, img.featured5,
   img.featured6, img.featured7, img.featured8, img.featured9,
+];
+
+export interface CategoryLink {
+  categoryId: string;
+  subcategoryId?: string;
+}
+
+// Parallel to featuredPicks: Movie snacks!, New launch, What's cooking?, Breakfast spread,
+// Smile please!, Sip & slurp, The organic zone, Chocolatey treats, Refresh it up!
+export const featuredPickLinks: CategoryLink[] = [
+  { categoryId: 'snacks', subcategoryId: 'chips-snacks' },
+  { categoryId: 'snacks', subcategoryId: 'chips-snacks' },
+  { categoryId: 'grocery', subcategoryId: 'staples' },
+  { categoryId: 'grocery', subcategoryId: 'dairy-breakfast' },
+  { categoryId: 'personal-care', subcategoryId: 'oral-care' },
+  { categoryId: 'grocery', subcategoryId: 'staples' },
+  { categoryId: 'grocery', subcategoryId: 'staples' },
+  { categoryId: 'snacks', subcategoryId: 'chocolates' },
+  { categoryId: 'snacks', subcategoryId: 'soft-drinks' },
 ];
 
 export const topDeals: ProductItem[] = [
@@ -92,6 +112,19 @@ export const snackItems: ProductItem[] = [
 export const essentialTiles = [
   img.essential1, img.essential2, img.essential3, img.essential4,
   img.essential5, img.essential6, img.essential7, img.essential8,
+];
+
+// Parallel to essentialTiles: Atta & rice, Oil & ghee, Dal & pulses, Suji & flours,
+// Spices & pickles, Tea & coffee, Dry fruits, Cereals & muesli
+export const essentialTileLinks: CategoryLink[] = [
+  { categoryId: 'grocery', subcategoryId: 'staples' },
+  { categoryId: 'grocery', subcategoryId: 'staples' },
+  { categoryId: 'grocery', subcategoryId: 'staples' },
+  { categoryId: 'grocery', subcategoryId: 'staples' },
+  { categoryId: 'grocery', subcategoryId: 'staples' },
+  { categoryId: 'snacks', subcategoryId: 'tea-coffee' },
+  { categoryId: 'grocery', subcategoryId: 'staples' },
+  { categoryId: 'grocery', subcategoryId: 'dairy-breakfast' },
 ];
 
 export const saverItems: ProductItem[] = [

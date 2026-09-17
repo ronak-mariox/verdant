@@ -7,6 +7,9 @@ import {
   CancelIneligibleScreen,
   CancelOrderScreen,
   CartScreen,
+  CategoryDetailScreen,
+  CategoryScreen,
+  CreateAccountScreen,
   DeliveryOptionsScreen,
   EditProfileScreen,
   HomeScreen,
@@ -18,6 +21,7 @@ import {
   LocationPermissionScreen,
   LocationSelectionScreen,
   LoginScreen,
+  SignupScreen,
   NotificationDetailScreen,
   NotificationsScreen,
   OrderCancelledScreen,
@@ -60,8 +64,12 @@ export function RootNavigator() {
         <Stack.Screen name="LocationSelection" component={LocationSelectionScreen} />
         <Stack.Screen name="LocationNotFound" component={LocationNotFoundScreen} />
         <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="Signup" component={SignupScreen} />
         <Stack.Screen name="Otp" component={OtpScreen} />
+        <Stack.Screen name="CreateAccount" component={CreateAccountScreen} />
         <Stack.Screen name="Home" component={HomeScreen} />
+        <Stack.Screen name="Category" component={CategoryScreen} />
+        <Stack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
         <Stack.Screen name="Search" component={SearchScreen} />
         <Stack.Screen name="ProductDetail" component={ProductDetailScreen} />
         <Stack.Screen name="Cart" component={CartScreen} />

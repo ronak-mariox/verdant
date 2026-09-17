@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -16,14 +16,47 @@ import {
   MenuSavedIcon,
   MenuSettingsIcon,
 } from '../assets/icons/profile';
-import { avatar } from '../assets/images/profile';
+import { avatar as defaultAvatar } from '../assets/images/profile';
 import { userProfile } from '../data/profile';
 import type { AuthStackParamList } from '../navigation/types';
+import { useAuth } from '../context/AuthContext';
+import { API_ORIGIN } from '../services/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Profile'>;
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatMemberSince(iso?: string | null): string {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '—';
+  return `${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
+}
+
 export function ProfileScreen({ navigation }: Props) {
+  const { user, logout, refreshUser } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>('profile');
+
+  // Picks up anything changed on EditProfileScreen (name/email/avatar) even if this
+  // screen instance was already mounted before the user navigated there and back.
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      refreshUser().catch(() => {
+        // Best-effort — the profile still renders from the last-known user in context.
+      });
+    });
+    return unsubscribe;
+  }, [navigation, refreshUser]);
+
+  const avatarSource = useMemo(
+    () => (user?.avatarUrl ? { uri: `${API_ORIGIN}${user.avatarUrl}` } : defaultAvatar),
+    [user?.avatarUrl],
+  );
+
+  const handleLogout = async () => {
+    await logout();
+    navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+  };
 
   const handleTabChange = (tab: NavTab) => {
     setActiveTab(tab);
@@ -31,6 +64,8 @@ export function ProfileScreen({ navigation }: Props) {
       navigation.navigate('Home');
     } else if (tab === 'search') {
       navigation.navigate('Search');
+    } else if (tab === 'categories') {
+      navigation.navigate('Category');
     } else if (tab === 'orders') {
       navigation.navigate('OrderHistory');
     }
@@ -43,15 +78,15 @@ export function ProfileScreen({ navigation }: Props) {
         <View style={styles.heroSafeArea}>
           <SafeAreaView edges={['top']}>
             <View style={styles.heroContent}>
-              <View style={styles.avatarWrap}>
-                <Image source={avatar} style={styles.avatarImage} />
+              <Pressable style={styles.avatarWrap} onPress={() => navigation.navigate('EditProfile')} hitSlop={8}>
+                <Image source={avatarSource} style={styles.avatarImage} />
                 <View style={styles.editBadge}>
                   <EditBadgeIcon width={12} height={12} />
                 </View>
-              </View>
-              <Text style={styles.name}>{userProfile.name}</Text>
-              <Text style={styles.email}>{userProfile.email}</Text>
-              <Text style={styles.phone}>{userProfile.phone}</Text>
+              </Pressable>
+              <Text style={styles.name}>{user?.name || 'Add your name'}</Text>
+              {user?.email ? <Text style={styles.email}>{user.email}</Text> : null}
+              <Text style={styles.phone}>+91 {user?.phone}</Text>
 
               <View style={styles.statsCard}>
                 <View style={styles.statCell}>
@@ -155,12 +190,12 @@ export function ProfileScreen({ navigation }: Props) {
               icon={<MenuLogoutIcon width={16} height={16} />}
               title="Logout"
               titleColor="#EF4444"
-              onPress={() => navigation.reset({ index: 0, routes: [{ name: 'Login' }] })}
+              onPress={handleLogout}
               last
             />
           </View>
 
-          <Text style={styles.footerText}>Version 4.8.2 · Member since {userProfile.memberSince}</Text>
+          <Text style={styles.footerText}>Version 4.8.2 · Member since {formatMemberSince(user?.createdAt)}</Text>
         </View>
       </ScrollView>
 

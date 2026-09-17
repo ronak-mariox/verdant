@@ -7,9 +7,10 @@ interface ProductRowProps {
   data: ProductItem[];
   backgroundColor?: string;
   onItemPress?: (item: ProductItem) => void;
+  onAddPress?: (item: ProductItem) => void;
 }
 
-export function ProductRow({ data, backgroundColor, onItemPress }: ProductRowProps) {
+export function ProductRow({ data, backgroundColor, onItemPress, onAddPress }: ProductRowProps) {
   return (
     <FlatList
       horizontal
@@ -18,7 +19,9 @@ export function ProductRow({ data, backgroundColor, onItemPress }: ProductRowPro
       showsHorizontalScrollIndicator={false}
       style={backgroundColor ? { backgroundColor } : undefined}
       contentContainerStyle={styles.content}
-      renderItem={({ item }) => <ProductCard item={item} onPress={() => onItemPress?.(item)} />}
+      renderItem={({ item }) => (
+        <ProductCard item={item} onPress={() => onItemPress?.(item)} onAdd={() => onAddPress?.(item)} />
+      )}
       initialNumToRender={6}
       removeClippedSubviews
     />

@@ -1,24 +1,62 @@
-import React, { useMemo, useState } from 'react';
-import { Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { BackIcon, ReorderPinIcon } from '../assets/icons/order';
 import { useCart } from '../context/CartContext';
-import { activeOrder, reorderItems } from '../data/orders';
 import type { AuthStackParamList } from '../navigation/types';
+import { api } from '../services/api';
+import { resolveProductImage } from '../utils/productImage';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Reorder'>;
 
 const DELIVERY_FEE = 0;
 const PLATFORM_FEE = 5;
 
+interface RawOrderItem {
+  productId: string;
+  variantId: string;
+  name: string;
+  variantLabel: string;
+  imageUrl?: string;
+  price: number;
+  mrp: number;
+  quantity: number;
+  subtotal: number;
+}
+
+interface RawOrder {
+  id: string;
+  orderNumber: string;
+  items: RawOrderItem[];
+  address: { contactName?: string; line1: string; line2?: string; city: string; state: string; pincode: string };
+  placedAt: string;
+}
+
+function lineKey(item: RawOrderItem): string {
+  return `${item.productId}::${item.variantId}`;
+}
+
 export function ReorderScreen({ navigation, route }: Props) {
   const { addItem } = useCart();
-  const [quantities, setQuantities] = useState<Record<string, number>>(() =>
-    Object.fromEntries(reorderItems.map((item) => [item.id, item.id === 'ro-3' ? 2 : 1])),
-  );
+  const { orderId } = route.params;
+  const [order, setOrder] = useState<RawOrder | null>(null);
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [submitting, setSubmitting] = useState(false);
 
-  const orderId = route.params?.orderId ?? activeOrder.id;
+  useEffect(() => {
+    api.get<RawOrder>(`/customer/orders/${orderId}`).then(({ data }) => {
+      setOrder(data);
+      setQuantities(Object.fromEntries(data.items.map((item) => [lineKey(item), item.quantity])));
+    });
+  }, [orderId]);
+
+  const orderItems = order?.items ?? [];
+
+  const shortDate = useMemo(() => {
+    if (!order) return '';
+    return new Date(order.placedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  }, [order]);
 
   const setQuantity = (id: string, delta: number) => {
     setQuantities((prev) => ({ ...prev, [id]: Math.max(0, (prev[id] ?? 0) + delta) }));
@@ -29,29 +67,34 @@ export function ReorderScreen({ navigation, route }: Props) {
     [quantities],
   );
   const itemTotal = useMemo(
-    () => reorderItems.reduce((sum, item) => sum + item.price * (quantities[item.id] ?? 0), 0),
-    [quantities],
+    () => orderItems.reduce((sum, item) => sum + item.price * (quantities[lineKey(item)] ?? 0), 0),
+    [orderItems, quantities],
   );
   const total = itemTotal + DELIVERY_FEE + PLATFORM_FEE;
 
-  const handlePlaceReorder = () => {
-    reorderItems.forEach((item) => {
-      const qty = quantities[item.id] ?? 0;
-      if (qty > 0) {
-        addItem(
-          {
-            id: item.id,
-            title: item.name,
-            subtitle: item.subtitle,
-            price: item.price,
-            image: item.image,
-          },
-          qty,
-        );
-      }
-    });
-    navigation.navigate('Cart');
+  const handlePlaceReorder = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await Promise.all(
+        orderItems.map((item) => {
+          const qty = quantities[lineKey(item)] ?? 0;
+          return qty > 0 ? addItem(item.productId, item.variantId, qty) : Promise.resolve();
+        }),
+      );
+      navigation.navigate('Cart');
+    } finally {
+      setSubmitting(false);
+    }
   };
+
+  if (!order) {
+    return (
+      <View style={styles.loadingWrap}>
+        <ActivityIndicator color="#1CA672" size="large" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.flex}>
@@ -64,7 +107,7 @@ export function ReorderScreen({ navigation, route }: Props) {
           <View style={styles.headerTitleWrap}>
             <Text style={styles.headerTitle}>Reorder</Text>
             <Text style={styles.headerSubtitle}>
-              From {orderId} · {activeOrder.shortDate}
+              From {order.orderNumber} · {shortDate}
             </Text>
           </View>
         </View>
@@ -77,26 +120,27 @@ export function ReorderScreen({ navigation, route }: Props) {
               <Text style={styles.cardHeaderTitle}>Items</Text>
               <Text style={styles.cardHeaderCount}>{cartItemCount} in cart</Text>
             </View>
-            {reorderItems.map((item, index) => {
-              const qty = quantities[item.id] ?? 0;
+            {orderItems.map((item, index) => {
+              const key = lineKey(item);
+              const qty = quantities[key] ?? 0;
               return (
                 <View
-                  key={item.id}
-                  style={[styles.itemRow, index === reorderItems.length - 1 && styles.itemRowLast]}
+                  key={key}
+                  style={[styles.itemRow, index === orderItems.length - 1 && styles.itemRowLast]}
                 >
                   <View style={styles.itemImageWrap}>
-                    <Image source={item.image} style={styles.itemImage} resizeMode="contain" />
+                    <Image source={resolveProductImage(item.imageUrl)} style={styles.itemImage} resizeMode="contain" />
                   </View>
                   <View style={styles.itemInfo}>
                     <Text style={styles.itemName}>{item.name}</Text>
-                    <Text style={styles.itemSubtitle}>{item.subtitle}</Text>
+                    <Text style={styles.itemSubtitle}>{item.variantLabel}</Text>
                   </View>
                   <View style={styles.stepper}>
-                    <Pressable style={styles.stepperButton} onPress={() => setQuantity(item.id, -1)} hitSlop={4}>
+                    <Pressable style={styles.stepperButton} onPress={() => setQuantity(key, -1)} hitSlop={4}>
                       <Text style={styles.stepperSymbol}>−</Text>
                     </Pressable>
                     <Text style={styles.stepperValue}>{qty}</Text>
-                    <Pressable style={styles.stepperButton} onPress={() => setQuantity(item.id, 1)} hitSlop={4}>
+                    <Pressable style={styles.stepperButton} onPress={() => setQuantity(key, 1)} hitSlop={4}>
                       <Text style={styles.stepperSymbol}>+</Text>
                     </Pressable>
                   </View>
@@ -114,13 +158,17 @@ export function ReorderScreen({ navigation, route }: Props) {
                 <Text style={styles.cardHeaderTitle}>Delivery address</Text>
               </View>
               <View style={styles.homeTag}>
-                <Text style={styles.homeTagText}>🏠 {activeOrder.address.label}</Text>
+                <Text style={styles.homeTagText}>🏠 Home</Text>
               </View>
             </View>
             <View style={styles.addressBody}>
-              <Text style={styles.addressName}>{activeOrder.address.name}</Text>
-              <Text style={styles.addressLine}>{activeOrder.address.line1}</Text>
-              <Text style={styles.addressLine}>{activeOrder.address.line2}</Text>
+              <Text style={styles.addressName}>{order.address.contactName}</Text>
+              <Text style={styles.addressLine}>{order.address.line1}</Text>
+              <Text style={styles.addressLine}>
+                {[order.address.line2, order.address.city, `${order.address.state} – ${order.address.pincode}`]
+                  .filter(Boolean)
+                  .join(', ')}
+              </Text>
             </View>
           </View>
 
@@ -154,11 +202,15 @@ export function ReorderScreen({ navigation, route }: Props) {
             </View>
           </View>
           <Pressable
-            style={[styles.placeReorderButton, cartItemCount === 0 && styles.placeReorderButtonDisabled]}
-            disabled={cartItemCount === 0}
+            style={[styles.placeReorderButton, (cartItemCount === 0 || submitting) && styles.placeReorderButtonDisabled]}
+            disabled={cartItemCount === 0 || submitting}
             onPress={handlePlaceReorder}
           >
-            <Text style={styles.placeReorderText}>Place Reorder · ₹{total}</Text>
+            {submitting ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.placeReorderText}>Place Reorder · ₹{total}</Text>
+            )}
           </Pressable>
         </View>
       </SafeAreaView>
@@ -207,6 +259,7 @@ const billStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#F5F5F5' },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F5F5' },
   headerSafe: {
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,

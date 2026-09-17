@@ -57,7 +57,7 @@ export function HomeTopBar({
 
       <Pressable style={styles.searchBox} onPress={onSearchPress}>
         <SearchIconHome width={18} height={18} />
-        <Text style={styles.searchPlaceholder}>Search “tomatoes, milk, chips…”</Text>
+        <Text style={styles.searchPlaceholder}>Search atta, dal & more</Text>
         <MicIcon width={18} height={18} />
       </Pressable>
     </SafeAreaView>

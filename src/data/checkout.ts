@@ -3,38 +3,16 @@ export interface Address {
   type: 'Home' | 'Work' | 'Other';
   isDefault?: boolean;
   name: string;
-  line1: string;
-  line2: string;
   phone: string;
+  line1: string;
+  street: string;
+  landmark?: string;
+  city: string;
+  state: string;
+  pincode: string;
+  /** Combined display string for list screens: "street, city, state – pincode". */
+  line2: string;
 }
-
-export const addresses: Address[] = [
-  {
-    id: 'addr-1',
-    type: 'Home',
-    isDefault: true,
-    name: 'Priya Sharma',
-    line1: 'B-204, Green Valley Apartments',
-    line2: 'Sector 62, Noida, UP – 201309',
-    phone: '98765 43210',
-  },
-  {
-    id: 'addr-2',
-    type: 'Work',
-    name: 'Priya Sharma',
-    line1: 'Tower A, Infosys Campus, Sector 144',
-    line2: 'Noida, UP – 201304',
-    phone: '98765 43210',
-  },
-  {
-    id: 'addr-3',
-    type: 'Other',
-    name: 'Rahul Sharma',
-    line1: '12A, Ram Nagar Colony, Rajouri Garden',
-    line2: 'New Delhi – 110027',
-    phone: '91234 56789',
-  },
-];
 
 export type DeliverySpeedId = 'express' | 'scheduled' | 'standard';
 

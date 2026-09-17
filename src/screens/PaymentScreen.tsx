@@ -5,13 +5,12 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SecurityShield, WalletIcon, NetBankingIcon } from '../assets/icons/checkout';
 import { googlepay, moreCard, paytm, phonepe, visaCard } from '../assets/images/payment';
 import { CheckoutHeader } from '../components/checkout/CheckoutHeader';
+import { useCart } from '../context/CartContext';
 import { useCheckout } from '../context/CheckoutContext';
 import { paymentMethods, type PaymentMethodId } from '../data/checkout';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Payment'>;
-
-const AMOUNT_TO_PAY = 477;
 
 const METHOD_VISUAL: Partial<Record<PaymentMethodId, any>> = {
   gpay: googlepay,
@@ -25,7 +24,9 @@ const GROUP_ORDER: Array<'UPI' | 'Cards' | 'Banking' | 'More'> = ['UPI', 'Cards'
 
 export function PaymentScreen({ navigation }: Props) {
   const { paymentMethod, setPaymentMethod } = useCheckout();
+  const { pricing } = useCart();
   const [upiId, setUpiId] = useState('');
+  const amountToPay = pricing?.grandTotal ?? 0;
 
   return (
     <View style={styles.flex}>
@@ -35,7 +36,7 @@ export function PaymentScreen({ navigation }: Props) {
       <ScrollView style={styles.flex} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.amountCard}>
           <Text style={styles.amountLabel}>Amount to pay</Text>
-          <Text style={styles.amountValue}>₹{AMOUNT_TO_PAY}</Text>
+          <Text style={styles.amountValue}>₹{amountToPay}</Text>
         </View>
 
         {GROUP_ORDER.map((group) => (
@@ -104,7 +105,7 @@ export function PaymentScreen({ navigation }: Props) {
       <SafeAreaView edges={['bottom']} style={styles.footerSafe}>
         <View style={styles.footer}>
           <Pressable style={styles.payButton} onPress={() => navigation.navigate('ReviewOrder')}>
-            <Text style={styles.payButtonText}>Pay ₹{AMOUNT_TO_PAY}</Text>
+            <Text style={styles.payButtonText}>Pay ₹{amountToPay}</Text>
           </Pressable>
         </View>
       </SafeAreaView>

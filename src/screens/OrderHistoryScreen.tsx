@@ -1,17 +1,120 @@
-import React from 'react';
-import { Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Image, ImageSourcePropType, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { BackIcon, EmptyBoxIcon, ReorderBtnIcon, TrackBtnIcon } from '../assets/icons/order';
-import { type HistoryOrder, historyOrders } from '../data/orders';
+import { api } from '../services/api';
+import { resolveProductImage } from '../utils/productImage';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'OrderHistory'>;
 
+type BackendStatus =
+  | 'placed'
+  | 'accepted'
+  | 'preparing'
+  | 'ready_for_pickup'
+  | 'out_for_delivery'
+  | 'delivered'
+  | 'cancelled'
+  | 'rejected';
+
+interface RawOrderItem {
+  productId: string;
+  variantId: string;
+  name: string;
+  variantLabel: string;
+  imageUrl?: string;
+  price: number;
+  mrp: number;
+  quantity: number;
+  subtotal: number;
+}
+
+interface RawOrder {
+  id: string;
+  orderNumber: string;
+  items: RawOrderItem[];
+  pricing: { itemsTotal: number; taxTotal: number; deliveryFee: number; platformFee: number; discount: number; grandTotal: number };
+  status: BackendStatus;
+  placedAt: string;
+}
+
+interface HistoryOrder {
+  id: string;
+  orderNumber: string;
+  date: string;
+  status: 'active' | 'delivered' | 'cancelled';
+  statusLabel: string;
+  eta?: string;
+  etaBy?: string;
+  summary: string;
+  itemCount: number;
+  total: number;
+  thumbs?: ImageSourcePropType[];
+}
+
+const STATUS_LABELS: Record<BackendStatus, string> = {
+  placed: 'Order placed',
+  accepted: 'Accepted',
+  preparing: 'Preparing',
+  ready_for_pickup: 'Ready for pickup',
+  out_for_delivery: 'Out for delivery',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+  rejected: 'Rejected',
+};
+
+function groupStatus(status: BackendStatus): 'active' | 'delivered' | 'cancelled' {
+  if (status === 'delivered') return 'delivered';
+  if (status === 'cancelled' || status === 'rejected') return 'cancelled';
+  return 'active';
+}
+
+function mapOrder(order: RawOrder): HistoryOrder {
+  const placed = new Date(order.placedAt);
+  const etaDate = new Date(placed.getTime() + 20 * 60 * 1000);
+  const etaMinutes = Math.max(0, Math.round((etaDate.getTime() - Date.now()) / 60000));
+  const summary =
+    order.items.length > 1
+      ? `${order.items[0]?.name ?? 'Item'} + ${order.items.length - 1} more`
+      : order.items[0]?.name ?? 'Order';
+
+  return {
+    id: order.id,
+    orderNumber: order.orderNumber,
+    date: placed.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }),
+    status: groupStatus(order.status),
+    statusLabel: STATUS_LABELS[order.status],
+    eta: `${etaMinutes} min`,
+    etaBy: etaDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+    summary,
+    itemCount: order.items.length,
+    total: order.pricing.grandTotal,
+    thumbs: order.items.slice(0, 4).map((item) => resolveProductImage(item.imageUrl)),
+  };
+}
+
 export function OrderHistoryScreen({ navigation }: Props) {
-  const activeOrders = historyOrders.filter((o) => o.status === 'active');
-  const pastOrders = historyOrders.filter((o) => o.status !== 'active');
-  const isEmpty = historyOrders.length === 0;
+  const [orders, setOrders] = useState<HistoryOrder[] | null>(null);
+
+  useEffect(() => {
+    api.get<RawOrder[]>('/customer/orders').then(({ data }) => {
+      setOrders(data.map(mapOrder));
+    });
+  }, []);
+
+  if (!orders) {
+    return (
+      <View style={styles.loadingWrap}>
+        <ActivityIndicator color="#1CA672" size="large" />
+      </View>
+    );
+  }
+
+  const activeOrders = orders.filter((o) => o.status === 'active');
+  const pastOrders = orders.filter((o) => o.status !== 'active');
+  const isEmpty = orders.length === 0;
 
   return (
     <View style={styles.flex}>
@@ -23,7 +126,7 @@ export function OrderHistoryScreen({ navigation }: Props) {
           </Pressable>
           <View style={styles.headerTitleWrap}>
             <Text style={styles.headerTitle}>My Orders</Text>
-            {!isEmpty ? <Text style={styles.headerSubtitle}>{historyOrders.length} orders total</Text> : null}
+            {!isEmpty ? <Text style={styles.headerSubtitle}>{orders.length} orders total</Text> : null}
           </View>
         </View>
       </SafeAreaView>
@@ -93,7 +196,7 @@ function ActiveOrderCard({ order, navigation }: { order: HistoryOrder; navigatio
           <Text style={styles.activeEtaText}>{order.eta}</Text>
         </View>
         <Text style={styles.activeSubtitle}>
-          Arriving by {order.etaBy} · {order.id}
+          Arriving by {order.etaBy} · {order.orderNumber}
         </Text>
       </View>
       <View style={styles.activeThumbsRow}>
@@ -101,9 +204,6 @@ function ActiveOrderCard({ order, navigation }: { order: HistoryOrder; navigatio
           {(order.thumbs ?? []).slice(0, 4).map((thumb, index) => (
             <Image key={index} source={thumb} style={[styles.activeThumb, index > 0 && styles.activeThumbOverlap]} />
           ))}
-          <View style={[styles.activeThumb, styles.activeThumbOverlap, styles.activeThumbMore]}>
-            <Text style={styles.activeThumbMoreText}>+1</Text>
-          </View>
         </View>
         <Text style={styles.activeItemsText}>
           {order.itemCount} items · <Text style={styles.activeItemsBold}>₹{order.total}</Text>
@@ -112,7 +212,7 @@ function ActiveOrderCard({ order, navigation }: { order: HistoryOrder; navigatio
       <View style={styles.activeActionsRow}>
         <Pressable
           style={styles.activeTrackButton}
-          onPress={() => navigation.navigate('OrderTracking')}
+          onPress={() => navigation.navigate('OrderTracking', { orderId: order.id })}
         >
           <TrackBtnIcon width={13} height={13} />
           <Text style={styles.activeTrackText}>Track</Text>
@@ -134,7 +234,7 @@ function PastOrderCard({ order, navigation }: { order: HistoryOrder; navigation:
     <View style={styles.pastCard}>
       <View style={styles.pastCardHeader}>
         <View>
-          <Text style={styles.pastOrderId}>{order.id}</Text>
+          <Text style={styles.pastOrderId}>{order.orderNumber}</Text>
           <Text style={styles.pastDate}>{order.date}</Text>
         </View>
         <View style={[styles.pastStatusPill, cancelled && styles.pastStatusPillCancelled]}>
@@ -170,6 +270,7 @@ function PastOrderCard({ order, navigation }: { order: HistoryOrder; navigation:
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#F5F5F5' },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F5F5' },
   headerSafe: {
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,

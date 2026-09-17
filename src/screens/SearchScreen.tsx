@@ -1,5 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   Image,
   Keyboard,
@@ -15,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ChevronRightSmall, ClockIcon } from '../assets/icons';
 import { MicIcon, SearchIconHome } from '../assets/icons/homescreen';
-import { BackWhiteIcon } from '../assets/icons/store';
+import { BackWhiteIcon, CartIcon } from '../assets/icons/store';
 import { CloseXIcon, FilterIcon, GridViewIcon, ListViewIcon, SortArrowsIcon } from '../assets/icons/searchscreen';
 import { BottomNavBar, type NavTab } from '../components/home/BottomNavBar';
 import { FilterSheet } from '../components/search/FilterSheet';
@@ -28,15 +29,54 @@ import {
   POPULAR_SEARCHES,
   SORT_OPTIONS,
   applyResultFilters,
-  getAutocompleteSuggestions,
-  searchCatalog,
   sortResults,
   type FilterState,
   type SearchProduct,
   type SortOption,
 } from '../data/search';
 import type { AuthStackParamList } from '../navigation/types';
+import { api } from '../services/api';
+import { resolveProductImage } from '../utils/productImage';
 import { colors, radius, spacing, typography } from '../theme';
+
+interface RawVariant {
+  id: string;
+  label: string;
+  mrp: number;
+  price: number;
+  stock: number;
+}
+
+interface RawProduct {
+  id: string;
+  name: string;
+  brand?: string;
+  unit?: string;
+  images: string[];
+  variants: RawVariant[];
+}
+
+function toSearchProduct(product: RawProduct): SearchProduct {
+  const variant = product.variants[0];
+  const discountPercent =
+    variant && variant.mrp > 0 ? Math.round(((variant.mrp - variant.price) / variant.mrp) * 100) : 0;
+  return {
+    id: product.id,
+    image: resolveProductImage(product.images[0]),
+    title: product.name,
+    weight: product.unit ?? variant?.label ?? '',
+    category: '',
+    brand: product.brand ?? '',
+    price: variant?.price ?? 0,
+    originalPrice: variant?.mrp ?? 0,
+    discountPercent,
+    deliveryMins: 10,
+    popularity: 0,
+    inStock: (variant?.stock ?? 0) > 0,
+  };
+}
+
+const DEBOUNCE_MS = 300;
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Search'>;
 
@@ -57,9 +97,17 @@ function highlightMatch(text: string, query: string) {
   );
 }
 
-function GridProductCard({ product, onAddPress }: { product: SearchProduct; onAddPress: () => void }) {
+function GridProductCard({
+  product,
+  onPress,
+  onAddPress,
+}: {
+  product: SearchProduct;
+  onPress: () => void;
+  onAddPress: () => void;
+}) {
   return (
-    <View style={styles.gridCard}>
+    <Pressable style={styles.gridCard} onPress={onPress}>
       <Image source={product.image} style={styles.gridImage} resizeMode="cover" />
       <Text style={styles.gridTitle} numberOfLines={2}>
         {product.title}
@@ -71,12 +119,12 @@ function GridProductCard({ product, onAddPress }: { product: SearchProduct; onAd
           <Text style={styles.gridAddText}>ADD</Text>
         </Pressable>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
 export function SearchScreen({ navigation }: Props) {
-  const { addItem } = useCart();
+  const { addItem, itemCount } = useCart();
   const inputRef = useRef<TextInput>(null);
 
   const [query, setQuery] = useState('');
@@ -88,14 +136,48 @@ export function SearchScreen({ navigation }: Props) {
   const [sortSheetVisible, setSortSheetVisible] = useState(false);
   const [filterSheetVisible, setFilterSheetVisible] = useState(false);
 
+  const [suggestionProducts, setSuggestionProducts] = useState<RawProduct[]>([]);
+  const [rawResults, setRawResults] = useState<RawProduct[]>([]);
+  const [resultsLoading, setResultsLoading] = useState(false);
+
   const showResults = submittedQuery !== null && query === submittedQuery;
   const showSuggestions = query.length > 0 && !showResults;
   const showIdle = query.length === 0;
 
-  const baseResults = useMemo(() => searchCatalog(submittedQuery ?? ''), [submittedQuery]);
+  // Debounce live typing before hitting the search endpoint for autocomplete suggestions.
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!showSuggestions || !trimmed) {
+      setSuggestionProducts([]);
+      return;
+    }
+    const handle = setTimeout(() => {
+      api
+        .get<{ items: RawProduct[] }>('/customer/products/search', { params: { q: trimmed } })
+        .then(({ data }) => setSuggestionProducts(data.items))
+        .catch(() => setSuggestionProducts([]));
+    }, DEBOUNCE_MS);
+    return () => clearTimeout(handle);
+  }, [query, showSuggestions]);
+
+  // A submitted search (Enter, or tapping a recent/popular/suggestion term) fetches immediately.
+  useEffect(() => {
+    if (submittedQuery === null) {
+      setRawResults([]);
+      return;
+    }
+    setResultsLoading(true);
+    api
+      .get<{ items: RawProduct[] }>('/customer/products/search', { params: { q: submittedQuery } })
+      .then(({ data }) => setRawResults(data.items))
+      .catch(() => setRawResults([]))
+      .finally(() => setResultsLoading(false));
+  }, [submittedQuery]);
+
+  const baseResults = useMemo(() => rawResults.map(toSearchProduct), [rawResults]);
 
   const categoryChips = useMemo(() => {
-    const categories = Array.from(new Set(baseResults.map((item) => item.category)));
+    const categories = Array.from(new Set(baseResults.map((item) => item.category))).filter(Boolean);
     return ['All', ...categories];
   }, [baseResults]);
 
@@ -103,7 +185,7 @@ export function SearchScreen({ navigation }: Props) {
 
   const sortedResults = useMemo(() => sortResults(filteredResults, sortBy), [filteredResults, sortBy]);
 
-  const suggestions = useMemo(() => getAutocompleteSuggestions(query), [query]);
+  const suggestions = useMemo(() => suggestionProducts.map((p) => p.name).slice(0, 5), [suggestionProducts]);
 
   const handleSearch = (term: string) => {
     const trimmed = term.trim();
@@ -126,11 +208,15 @@ export function SearchScreen({ navigation }: Props) {
   };
 
   const handleAddToCart = (product: SearchProduct) => {
-    addItem({ id: product.id, title: product.title, subtitle: product.weight, price: product.price, mrp: product.originalPrice, image: product.image });
+    const variantId = rawResults.find((p) => p.id === product.id)?.variants[0]?.id;
+    if (variantId) addItem(product.id, variantId);
   };
+
+  const openProduct = (product: SearchProduct) => navigation.navigate('ProductDetail', { productId: product.id });
 
   const handleTabChange = (tab: NavTab) => {
     if (tab === 'home') navigation.navigate('Home');
+    else if (tab === 'categories') navigation.navigate('Category');
     else if (tab === 'orders') navigation.navigate('OrderHistory');
     else if (tab === 'profile') navigation.navigate('Profile');
   };
@@ -154,7 +240,7 @@ export function SearchScreen({ navigation }: Props) {
               value={query}
               onChangeText={setQuery}
               onSubmitEditing={() => handleSearch(query)}
-              placeholder='Search "tomatoes, milk, chips…"'
+              placeholder="Search atta, dal & more"
               placeholderTextColor={colors.text.subtle}
               returnKeyType="search"
             />
@@ -305,7 +391,11 @@ export function SearchScreen({ navigation }: Props) {
               </View>
             </View>
 
-            {sortedResults.length > 0 ? (
+            {resultsLoading ? (
+              <View style={styles.emptyState}>
+                <ActivityIndicator color={colors.brand.primary} size="large" />
+              </View>
+            ) : sortedResults.length > 0 ? (
               <FlatList
                 key={viewMode}
                 data={sortedResults}
@@ -315,9 +405,17 @@ export function SearchScreen({ navigation }: Props) {
                 contentContainerStyle={viewMode === 'grid' ? styles.gridContent : undefined}
                 renderItem={({ item }) =>
                   viewMode === 'list' ? (
-                    <SearchProductCard product={item} onAddPress={() => handleAddToCart(item)} />
+                    <SearchProductCard
+                      product={item}
+                      onPress={() => openProduct(item)}
+                      onAddPress={() => handleAddToCart(item)}
+                    />
                   ) : (
-                    <GridProductCard product={item} onAddPress={() => handleAddToCart(item)} />
+                    <GridProductCard
+                      product={item}
+                      onPress={() => openProduct(item)}
+                      onAddPress={() => handleAddToCart(item)}
+                    />
                   )
                 }
                 ListFooterComponent={
@@ -336,6 +434,18 @@ export function SearchScreen({ navigation }: Props) {
           </View>
         ) : null}
       </View>
+
+      {itemCount > 0 ? (
+        <Pressable style={styles.viewCartPill} onPress={() => navigation.navigate('Cart')}>
+          <View style={styles.viewCartIconWrap}>
+            <CartIcon width={18} height={18} />
+            <View style={styles.viewCartBadge}>
+              <Text style={styles.viewCartBadgeText}>{itemCount}</Text>
+            </View>
+          </View>
+          <Text style={styles.viewCartText}>View cart</Text>
+        </Pressable>
+      ) : null}
 
       <BottomNavBar active="search" onChange={handleTabChange} />
 
@@ -708,5 +818,53 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16.5,
     color: colors.brand.primary,
+  },
+  viewCartPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.brand.primary,
+    borderRadius: radius.full,
+    paddingLeft: spacing.xs,
+    paddingRight: spacing.md,
+    paddingVertical: spacing.xs,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 4,
+  },
+  viewCartIconWrap: {
+    width: 26,
+    height: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewCartBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -6,
+    minWidth: 16,
+    height: 16,
+    borderRadius: radius.full,
+    backgroundColor: colors.text.onBrand,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  viewCartBadgeText: {
+    ...typography.caption,
+    fontSize: 10,
+    lineHeight: 12,
+    fontFamily: typography.buttonMedium.fontFamily,
+    color: colors.brand.primary,
+  },
+  viewCartText: {
+    ...typography.buttonMedium,
+    fontSize: 14,
+    lineHeight: 21,
+    color: colors.text.onBrand,
   },
 });

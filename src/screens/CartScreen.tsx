@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Image,
@@ -22,21 +22,60 @@ import {
   TrashIcon,
 } from '../assets/icons/cart';
 import { useCart, type CartItem } from '../context/CartContext';
-import { DELIVERY_FEE, MIN_ORDER_VALUE, PLATFORM_FEE, couponSuggestions, recommendedProducts } from '../data/cart';
+import { couponSuggestions, MIN_ORDER_VALUE } from '../data/cart';
+import { api, getErrorMessage } from '../services/api';
+import { resolveProductImage } from '../utils/productImage';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Cart'>;
 
-const COUPON_DISCOUNTS: Record<string, number> = {
-  FRESH50: 50,
-  NEWUSER: 40,
-  SAVE30: 30,
-};
+interface RecommendedProduct {
+  id: string;
+  variantId: string;
+  image: ReturnType<typeof resolveProductImage>;
+  name: string;
+  price: number;
+  mrp: number;
+  discountLabel: string;
+  bgColor: string;
+}
+
+const REC_BG_COLORS = ['#EFF6FF', '#FEFCE8', '#FDF4FF', '#F0FDF4', '#FFF7ED'];
 
 export function CartScreen({ navigation }: Props) {
-  const { items, itemCount, increment, decrement, removeItem, addItem } = useCart();
+  const { items, itemCount, increment, decrement, removeItem, addItem, pricing, couponCode, couponMessage, applyCoupon: applyCouponToCart } =
+    useCart();
   const [coupon, setCoupon] = useState('');
-  const [appliedCoupon, setAppliedCoupon] = useState<string | null>(null);
+  const [recommended, setRecommended] = useState<RecommendedProduct[]>([]);
+
+  useEffect(() => {
+    api
+      .get<{ items: { id: string; name: string; images: string[]; variants: { id: string; price: number; mrp: number }[] }[] }>(
+        '/customer/products',
+        { params: { limit: 6, sort: 'newest' } },
+      )
+      .then(({ data }) => {
+        setRecommended(
+          data.items
+            .filter((p) => p.variants.length > 0)
+            .map((p, index) => {
+              const variant = p.variants[0];
+              const discountPct = variant.mrp > 0 ? Math.round(((variant.mrp - variant.price) / variant.mrp) * 100) : 0;
+              return {
+                id: p.id,
+                variantId: variant.id,
+                image: resolveProductImage(p.images[0]),
+                name: p.name,
+                price: variant.price,
+                mrp: variant.mrp,
+                discountLabel: `${discountPct}%`,
+                bgColor: REC_BG_COLORS[index % REC_BG_COLORS.length],
+              };
+            }),
+        );
+      })
+      .catch(() => {});
+  }, []);
 
   const itemTotal = useMemo(
     () => items.reduce((sum, i) => sum + (i.mrp ?? i.price) * i.quantity, 0),
@@ -46,25 +85,26 @@ export function CartScreen({ navigation }: Props) {
     () => items.reduce((sum, i) => sum + ((i.mrp ?? i.price) - i.price) * i.quantity, 0),
     [items],
   );
-  const couponDiscount = appliedCoupon ? COUPON_DISCOUNTS[appliedCoupon] ?? 0 : 0;
-  const toPay = Math.max(0, itemTotal - productDiscount - couponDiscount + DELIVERY_FEE + PLATFORM_FEE);
-  const amountNeeded = Math.max(0, MIN_ORDER_VALUE - (itemTotal - productDiscount));
-  const progress = Math.min(1, (itemTotal - productDiscount) / MIN_ORDER_VALUE);
+  const deliveryFee = pricing?.deliveryFee ?? 0;
+  const platformFee = pricing?.platformFee ?? 0;
+  const couponDiscount = pricing?.discount ?? 0;
+  const toPay = pricing?.grandTotal ?? 0;
+  const amountNeeded = Math.max(0, MIN_ORDER_VALUE - (pricing?.itemsTotal ?? 0));
+  const progress = Math.min(1, (pricing?.itemsTotal ?? 0) / MIN_ORDER_VALUE);
 
-  const applyCoupon = () => {
+  const handleApplyCoupon = async () => {
     const code = coupon.trim().toUpperCase();
     if (!code) return;
-    if (COUPON_DISCOUNTS[code]) {
-      setAppliedCoupon(code);
-      Alert.alert('Coupon applied', `You saved an extra ₹${COUPON_DISCOUNTS[code]} with ${code}!`);
-    } else {
-      setAppliedCoupon(null);
-      Alert.alert('Invalid coupon', `"${code}" is not a valid coupon code.`);
+    try {
+      await applyCouponToCart(code);
+      Alert.alert('Coupon applied', `"${code}" was applied to your order!`);
+    } catch (err) {
+      Alert.alert('Invalid coupon', getErrorMessage(err, `"${code}" is not a valid coupon code.`));
     }
   };
 
   const saveForLater = (item: CartItem) => {
-    removeItem(item.id);
+    removeItem(item.id).catch(() => {});
     Alert.alert('Saved for later', `${item.title} was moved out of your cart.`);
   };
 
@@ -156,7 +196,7 @@ export function CartScreen({ navigation }: Props) {
               />
               <Pressable
                 style={[styles.couponApply, coupon.length > 0 && styles.couponApplyActive]}
-                onPress={applyCoupon}
+                onPress={handleApplyCoupon}
               >
                 <Text style={[styles.couponApplyText, coupon.length > 0 && styles.couponApplyTextActive]}>
                   Apply
@@ -170,10 +210,12 @@ export function CartScreen({ navigation }: Props) {
                 </Pressable>
               ))}
             </View>
-            {appliedCoupon ? (
+            {couponCode ? (
               <Text style={styles.couponAppliedText}>
-                &quot;{appliedCoupon}&quot; applied — you saved ₹{couponDiscount}
+                &quot;{couponCode}&quot; applied — you saved ₹{couponDiscount}
               </Text>
+            ) : couponMessage ? (
+              <Text style={styles.couponAppliedText}>{couponMessage}</Text>
             ) : null}
           </View>
 
@@ -191,12 +233,10 @@ export function CartScreen({ navigation }: Props) {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.recList}
             >
-              {recommendedProducts.map((p) => (
+              {recommended.map((p) => (
                 <View key={p.id} style={styles.recCard}>
                   <View style={[styles.recImageWrap, { backgroundColor: p.bgColor }]}>
-                    {p.image ? (
-                      <Image source={p.image} style={styles.recImage} resizeMode="cover" />
-                    ) : null}
+                    <Image source={p.image} style={styles.recImage} resizeMode="cover" />
                     <View style={styles.recDiscountBadge}>
                       <Text style={styles.recDiscountText}>{p.discountLabel}</Text>
                     </View>
@@ -209,19 +249,7 @@ export function CartScreen({ navigation }: Props) {
                       <Text style={styles.recPrice}>₹{p.price}</Text>
                       <Text style={styles.recMrp}>₹{p.mrp}</Text>
                     </View>
-                    <Pressable
-                      style={styles.recAddButton}
-                      onPress={() =>
-                        addItem({
-                          id: p.id,
-                          title: p.name,
-                          subtitle: '',
-                          price: p.price,
-                          mrp: p.mrp,
-                          image: p.image ?? recommendedProducts[0].image!,
-                        })
-                      }
-                    >
+                    <Pressable style={styles.recAddButton} onPress={() => addItem(p.id, p.variantId).catch(() => {})}>
                       <Text style={styles.recAddText}>ADD</Text>
                     </Pressable>
                   </View>
@@ -236,11 +264,11 @@ export function CartScreen({ navigation }: Props) {
             <Text style={styles.billTitle}>Bill Details</Text>
             <BillRow label="Item total (MRP)" value={`₹${itemTotal}`} />
             <BillRow label="Product discount" value={`−₹${productDiscount}`} valueColor="#1CA672" />
-            {appliedCoupon ? (
-              <BillRow label={`Coupon (${appliedCoupon})`} value={`−₹${couponDiscount}`} valueColor="#1CA672" />
+            {couponCode ? (
+              <BillRow label={`Coupon (${couponCode})`} value={`−₹${couponDiscount}`} valueColor="#1CA672" />
             ) : null}
-            <BillRow label="Delivery fee" value={`₹${DELIVERY_FEE}`} labelColor="#9CA3AF" />
-            <BillRow label="Platform fee" value={`₹${PLATFORM_FEE}`} labelColor="#9CA3AF" />
+            <BillRow label="Delivery fee" value={deliveryFee > 0 ? `₹${deliveryFee}` : 'FREE'} labelColor="#9CA3AF" />
+            <BillRow label="Platform fee" value={`₹${platformFee}`} labelColor="#9CA3AF" />
             <View style={styles.billDividerLine} />
             <BillRow label="To Pay" value={`₹${toPay}`} bold />
             {productDiscount > 0 ? (

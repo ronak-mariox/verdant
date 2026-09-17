@@ -46,14 +46,13 @@ export function StoreDetailScreen({ navigation, route }: Props) {
   };
 
   const addToCart = (item: StoreProduct) => {
-    addItem({
-      id: item.id,
-      title: item.title,
-      subtitle: item.weight,
-      price: item.price,
-      mrp: item.originalPrice,
-      image: item.image,
-    });
+    // This store's catalog (giftPackings, bigPackSavings, etc.) is still static mock data —
+    // there is no per-vendor storefront endpoint yet and no real vendorId flows into this
+    // screen from navigation (see HomeScreen's "Shop by store" tiles), so these ids don't
+    // correspond to real backend products/variants. Fire the real cart call anyway so the
+    // signature matches the new backend-backed addItem, and swallow the inevitable failure
+    // quietly rather than leaving an unhandled promise rejection.
+    addItem(item.id, item.id).catch(() => {});
   };
 
   return (
@@ -67,7 +66,7 @@ export function StoreDetailScreen({ navigation, route }: Props) {
           <Pressable style={styles.searchBar} onPress={() => navigation.navigate('Home')}>
             <SearchIcon width={18} height={18} />
             <Text style={styles.searchPlaceholder} numberOfLines={1}>
-              Search for Products, Brands and More
+              Search atta, dal & more
             </Text>
           </Pressable>
           <Pressable style={styles.cartButton} onPress={() => navigation.navigate('Cart')}>
