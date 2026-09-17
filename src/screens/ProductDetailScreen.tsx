@@ -30,9 +30,10 @@ import {
   StarIcon,
 } from '../assets/icons/product';
 import { brandIcon, seeAllThumb1, seeAllThumb2, seeAllThumb3 } from '../assets/images/product';
-import { ProductDetailsAccordion } from '../components/product/ProductDetailsAccordion';
+import { ProductDetailsAccordion, type ProductHighlight } from '../components/product/ProductDetailsAccordion';
 import { SimilarProductCard } from '../components/product/SimilarProductCard';
 import { useCart } from '../context/CartContext';
+import { useCheckout } from '../context/CheckoutContext';
 import type { SimilarProduct, Variant } from '../data/product';
 import type { AuthStackParamList } from '../navigation/types';
 import { api } from '../services/api';
@@ -64,11 +65,41 @@ interface RawProduct {
   taxRate: number;
   status: string;
   isAvailable: boolean;
+  sku?: string;
+  barcode?: string;
+  hsnCode?: string;
+  countryOfOrigin?: string;
+}
+
+interface RatingSummary {
+  avg: number;
+  count: number;
 }
 
 interface ProductDetailResponse {
   product: RawProduct;
   similar: RawProduct[];
+  rating: RatingSummary;
+}
+
+/** Only surfaces attributes the product actually has set, instead of a fixed
+ * template of fields that don't apply to every product (e.g. an FSSAI number
+ * makes no sense on a t-shirt). */
+function buildHighlights(product: RawProduct, variant?: { label: string }): ProductHighlight[] {
+  const highlights: ProductHighlight[] = [];
+  if (product.brand) highlights.push({ label: 'Brand', value: product.brand });
+  const quantity = variant?.label ?? product.unit;
+  if (quantity) highlights.push({ label: 'Quantity', value: quantity });
+  if (product.sku) highlights.push({ label: 'SKU', value: product.sku });
+  if (product.barcode) highlights.push({ label: 'Barcode', value: product.barcode });
+  if (product.hsnCode) highlights.push({ label: 'HSN Code', value: product.hsnCode });
+  if (product.countryOfOrigin) highlights.push({ label: 'Country of Origin', value: product.countryOfOrigin });
+  return highlights;
+}
+
+function formatRatingCount(count: number): string {
+  if (count >= 1000) return `${(count / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+  return count.toLocaleString('en-IN');
 }
 
 function toSimilarDisplay(product: RawProduct): SimilarProduct {
@@ -100,6 +131,7 @@ export function ProductDetailScreen({ navigation, route }: Props) {
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const { itemCount, items, addItem } = useCart();
+  const { addressList, selectedAddressId } = useCheckout();
   const cartThumbItems = items.slice(0, 3);
 
   useEffect(() => {
@@ -139,7 +171,7 @@ export function ProductDetailScreen({ navigation, route }: Props) {
     );
   }
 
-  const { product, similar } = data;
+  const { product, similar, rating } = data;
   const variantData: Variant[] = product.variants;
   const selectedVariant = variantData.find((v) => v.id === selectedVariantId) ?? variantData[0];
   const discountPercent =
@@ -151,6 +183,11 @@ export function ProductDetailScreen({ navigation, route }: Props) {
   const subtitle = product.description || [product.brand, selectedVariant?.label].filter(Boolean).join(' • ');
   const similarRow1 = similar.slice(0, 3).map(toSimilarDisplay);
   const similarRow2 = similar.slice(3, 6).map(toSimilarDisplay);
+  const highlights = buildHighlights(product, selectedVariant);
+  const deliveryAddress = addressList.find((a) => a.id === selectedAddressId) ?? addressList[0] ?? null;
+  const deliveryAddressSummary = deliveryAddress
+    ? { label: deliveryAddress.type.toUpperCase(), text: [deliveryAddress.line1, deliveryAddress.line2].filter(Boolean).join(', ') }
+    : null;
 
   const handleAddToCart = () => {
     if (!selectedVariant) return;
@@ -202,12 +239,14 @@ export function ProductDetailScreen({ navigation, route }: Props) {
       <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
         <View style={styles.heroWrap}>
           <Image source={heroImage} style={styles.heroImage} resizeMode="contain" />
-          <View style={styles.ratingBadge}>
-            <StarBold width={16} height={16} />
-            <Text style={styles.ratingBadgeText}>
-              4.8 <Text style={styles.ratingBadgeCount}>(1k)</Text>
-            </Text>
-          </View>
+          {rating.count > 0 ? (
+            <View style={styles.ratingBadge}>
+              <StarBold width={16} height={16} />
+              <Text style={styles.ratingBadgeText}>
+                {rating.avg.toFixed(1)} <Text style={styles.ratingBadgeCount}>({formatRatingCount(rating.count)})</Text>
+              </Text>
+            </View>
+          ) : null}
           <View style={styles.pageDots}>
             {[0, 1, 2].map((i) => (
               <View key={i} style={[styles.dot, i === 0 && styles.dotActive]} />
@@ -222,11 +261,13 @@ export function ProductDetailScreen({ navigation, route }: Props) {
                 <ClockIcon width={14} height={14} />
                 <Text style={styles.deliveryText}>10 mins</Text>
               </View>
-              <View style={styles.ratingChip}>
-                <StarIcon width={14} height={14} />
-                <Text style={styles.ratingChipValue}>4.7</Text>
-                <Text style={styles.ratingChipCount}>(2,341)</Text>
-              </View>
+              {rating.count > 0 ? (
+                <View style={styles.ratingChip}>
+                  <StarIcon width={14} height={14} />
+                  <Text style={styles.ratingChipValue}>{rating.avg.toFixed(1)}</Text>
+                  <Text style={styles.ratingChipCount}>({formatRatingCount(rating.count)})</Text>
+                </View>
+              ) : null}
             </View>
 
             <Text style={styles.title}>{product.name}</Text>
@@ -295,7 +336,9 @@ export function ProductDetailScreen({ navigation, route }: Props) {
             </Pressable>
           </View>
 
-          {detailsExpanded ? <ProductDetailsAccordion /> : null}
+          {detailsExpanded ? (
+            <ProductDetailsAccordion highlights={highlights} address={deliveryAddressSummary} rating={rating} />
+          ) : null}
 
           <View style={styles.infoRow}>
             <View style={styles.infoRowLeft}>

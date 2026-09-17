@@ -1,18 +1,22 @@
 import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
-import { HomePin, UnlockArrow } from '../../assets/icons/product';
-import { couponIcon1, featureCod, featureDoorstep, featureNoReturns } from '../../assets/images/product/details';
+import { HomePin } from '../../assets/icons/product';
+import { featureCod, featureDoorstep, featureNoReturns } from '../../assets/images/product/details';
 
-const HIGHLIGHTS: { label: string; value: string }[] = [
-  { label: 'Pack of', value: '1' },
-  { label: 'Brand', value: 'FORTUNE' },
-  { label: 'Model Name', value: 'Soya Health Refined' },
-  { label: 'Type', value: 'Soyabean Oil' },
-  { label: 'Quantity', value: '750 g' },
-  { label: 'Used For', value: 'Cooking' },
-  { label: 'Processing Type', value: 'Refined' },
-  { label: 'FSSAI Number', value: '10013021000661' },
-];
+export interface ProductHighlight {
+  label: string;
+  value: string;
+}
+
+export interface DeliveryAddressSummary {
+  label: string;
+  text: string;
+}
+
+export interface RatingSummary {
+  avg: number;
+  count: number;
+}
 
 const FEATURES = [
   { image: featureDoorstep, label: 'Doorstep\ncancellation' },
@@ -20,43 +24,50 @@ const FEATURES = [
   { image: featureCod, label: 'Cash on\nDelivery' },
 ];
 
-export function ProductDetailsAccordion() {
+function ratingQualityLabel(avg: number): string {
+  if (avg >= 4.5) return 'Excellent';
+  if (avg >= 4) return 'Very Good';
+  if (avg >= 3) return 'Good';
+  if (avg >= 2) return 'Average';
+  return 'Needs Improvement';
+}
+
+interface Props {
+  highlights: ProductHighlight[];
+  address: DeliveryAddressSummary | null;
+  rating: RatingSummary;
+}
+
+export function ProductDetailsAccordion({ highlights, address, rating }: Props) {
   return (
     <View style={styles.wrap}>
-      <View style={styles.couponCard}>
-        <Text style={styles.couponHeader}>Additional benefits on this purchase</Text>
-        <View style={styles.couponRow}>
-          <Image source={couponIcon1} style={styles.couponIcon} resizeMode="contain" />
-          <Text style={styles.couponText}>Unlock Cosmic Byte coupon • 10% off</Text>
-          <UnlockArrow width={24} height={24} />
+      {highlights.length > 0 ? (
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Product highlights</Text>
+          <View style={styles.highlightsGrid}>
+            {highlights.map((h) => (
+              <View key={h.label} style={styles.highlightItem}>
+                <Text style={styles.highlightLabel}>{h.label}</Text>
+                <Text style={styles.highlightValue}>{h.value}</Text>
+              </View>
+            ))}
+          </View>
         </View>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Product highlights</Text>
-        <View style={styles.highlightsGrid}>
-          {HIGHLIGHTS.map((h) => (
-            <View key={h.label} style={styles.highlightItem}>
-              <Text style={styles.highlightLabel}>{h.label}</Text>
-              <Text style={styles.highlightValue}>{h.value}</Text>
-            </View>
-          ))}
-        </View>
-      </View>
+      ) : null}
 
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Delivery details</Text>
         <View style={styles.deliveryBox}>
           <View style={styles.deliveryAddrRow}>
             <HomePin width={16} height={16} />
-            <Text style={styles.deliveryAddrLabel}>HOME</Text>
+            <Text style={styles.deliveryAddrLabel}>{address?.label ?? 'DELIVER TO'}</Text>
             <Text style={styles.deliveryAddrText} numberOfLines={1}>
-              I133 Bhima Chowk, Achheja, Royal City Road, Greater Noida
+              {address?.text ?? 'Add a delivery address to see delivery details'}
             </Text>
           </View>
           <View style={styles.deliveryTimeRow}>
             <Text style={styles.deliveryTimeLabel}>Delivery in</Text>
-            <Text style={styles.deliveryTimeValue}>17 Min</Text>
+            <Text style={styles.deliveryTimeValue}>10 mins</Text>
           </View>
         </View>
       </View>
@@ -75,12 +86,18 @@ export function ProductDetailsAccordion() {
       <View style={styles.card}>
         <View style={styles.ratingsHeader}>
           <Text style={styles.sectionTitle}>Ratings and reviews</Text>
-          <View style={styles.ratingsSummary}>
-            <Text style={styles.ratingsScore}>4.3</Text>
-            <Text style={styles.ratingsGood}>Very Good</Text>
-          </View>
+          {rating.count > 0 ? (
+            <View style={styles.ratingsSummary}>
+              <Text style={styles.ratingsScore}>{rating.avg.toFixed(1)}</Text>
+              <Text style={styles.ratingsGood}>{ratingQualityLabel(rating.avg)}</Text>
+            </View>
+          ) : null}
         </View>
-        <Text style={styles.ratingsSubtext}>based on 15,883 ratings by Verified Buyers</Text>
+        <Text style={styles.ratingsSubtext}>
+          {rating.count > 0
+            ? `Based on ${rating.count.toLocaleString('en-IN')} rating${rating.count === 1 ? '' : 's'} by Verified Buyers`
+            : 'No ratings yet — be the first to receive this product'}
+        </Text>
       </View>
     </View>
   );
