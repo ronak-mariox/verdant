@@ -43,9 +43,21 @@ interface RecommendedProduct {
 const REC_BG_COLORS = ['#EFF6FF', '#FEFCE8', '#FDF4FF', '#F0FDF4', '#FFF7ED'];
 
 export function CartScreen({ navigation }: Props) {
-  const { items, itemCount, increment, decrement, removeItem, addItem, pricing, couponCode, couponMessage, applyCoupon: applyCouponToCart } =
-    useCart();
+  const {
+    items,
+    itemCount,
+    increment,
+    decrement,
+    removeItem,
+    addItem,
+    pricing,
+    couponCode,
+    couponMessage,
+    applyCoupon: applyCouponToCart,
+    removeCoupon,
+  } = useCart();
   const [coupon, setCoupon] = useState('');
+  const [removingCoupon, setRemovingCoupon] = useState(false);
   const [recommended, setRecommended] = useState<RecommendedProduct[]>([]);
 
   useEffect(() => {
@@ -97,9 +109,21 @@ export function CartScreen({ navigation }: Props) {
     if (!code) return;
     try {
       await applyCouponToCart(code);
+      setCoupon('');
       Alert.alert('Coupon applied', `"${code}" was applied to your order!`);
     } catch (err) {
       Alert.alert('Invalid coupon', getErrorMessage(err, `"${code}" is not a valid coupon code.`));
+    }
+  };
+
+  const handleRemoveCoupon = async () => {
+    setRemovingCoupon(true);
+    try {
+      await removeCoupon();
+    } catch (err) {
+      Alert.alert('Could not remove coupon', getErrorMessage(err));
+    } finally {
+      setRemovingCoupon(false);
     }
   };
 
@@ -211,9 +235,14 @@ export function CartScreen({ navigation }: Props) {
               ))}
             </View>
             {couponCode ? (
-              <Text style={styles.couponAppliedText}>
-                &quot;{couponCode}&quot; applied — you saved ₹{couponDiscount}
-              </Text>
+              <View style={styles.couponAppliedRow}>
+                <Text style={styles.couponAppliedText}>
+                  &quot;{couponCode}&quot; applied — you saved ₹{couponDiscount}
+                </Text>
+                <Pressable onPress={handleRemoveCoupon} disabled={removingCoupon} hitSlop={8}>
+                  <Text style={styles.couponRemoveText}>{removingCoupon ? 'Removing…' : 'Remove'}</Text>
+                </Pressable>
+              </View>
             ) : couponMessage ? (
               <Text style={styles.couponAppliedText}>{couponMessage}</Text>
             ) : null}
@@ -752,11 +781,23 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1CA672',
   },
+  couponAppliedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingTop: 10,
+  },
   couponAppliedText: {
+    flex: 1,
     fontSize: 12,
     fontWeight: '600',
     color: '#1CA672',
-    paddingTop: 10,
+  },
+  couponRemoveText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#DC2626',
   },
   recSection: {
     backgroundColor: '#FFFFFF',
