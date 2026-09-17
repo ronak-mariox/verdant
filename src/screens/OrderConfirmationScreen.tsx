@@ -145,6 +145,9 @@ export function OrderConfirmationScreen({ navigation, route }: Props) {
               {order.couponCode ? (
                 <BillRow label={`Coupon ${order.couponCode}`} value={`-₹${order.pricing.discount}`} valueColor="#1CA672" />
               ) : null}
+              {order.pricing.taxTotal > 0 ? (
+                <BillRow label="Taxes" value={`₹${order.pricing.taxTotal}`} labelColor="#9CA3AF" />
+              ) : null}
               <BillRow
                 label="Delivery fee"
                 value={order.pricing.deliveryFee === 0 ? 'FREE' : `₹${order.pricing.deliveryFee}`}

@@ -99,6 +99,7 @@ export function CartScreen({ navigation }: Props) {
   );
   const deliveryFee = pricing?.deliveryFee ?? 0;
   const platformFee = pricing?.platformFee ?? 0;
+  const taxTotal = pricing?.taxTotal ?? 0;
   const couponDiscount = pricing?.discount ?? 0;
   const toPay = pricing?.grandTotal ?? 0;
   const amountNeeded = Math.max(0, MIN_ORDER_VALUE - (pricing?.itemsTotal ?? 0));
@@ -296,6 +297,7 @@ export function CartScreen({ navigation }: Props) {
             {couponCode ? (
               <BillRow label={`Coupon (${couponCode})`} value={`−₹${couponDiscount}`} valueColor="#1CA672" />
             ) : null}
+            {taxTotal > 0 ? <BillRow label="Taxes" value={`₹${taxTotal}`} labelColor="#9CA3AF" /> : null}
             <BillRow label="Delivery fee" value={deliveryFee > 0 ? `₹${deliveryFee}` : 'FREE'} labelColor="#9CA3AF" />
             <BillRow label="Platform fee" value={`₹${platformFee}`} labelColor="#9CA3AF" />
             <View style={styles.billDividerLine} />

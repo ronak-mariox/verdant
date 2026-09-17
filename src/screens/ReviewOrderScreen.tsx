@@ -25,6 +25,7 @@ export function ReviewOrderScreen({ navigation }: Props) {
   );
   const deliveryFee = pricing?.deliveryFee ?? 0;
   const platformFee = pricing?.platformFee ?? 0;
+  const taxTotal = pricing?.taxTotal ?? 0;
   const couponDiscount = pricing?.discount ?? 0;
   const toPay = pricing?.grandTotal ?? 0;
   const totalSavings = productDiscount + couponDiscount;
@@ -118,6 +119,7 @@ export function ReviewOrderScreen({ navigation }: Props) {
           <BillRow label="Item total (MRP)" value={`₹${itemTotal}`} />
           <BillRow label="Product discount" value={`−₹${productDiscount}`} valueColor="#1CA672" />
           {couponCode ? <BillRow label="Coupon discount" value={`−₹${couponDiscount}`} valueColor="#1CA672" /> : null}
+          {taxTotal > 0 ? <BillRow label="Taxes" value={`₹${taxTotal}`} labelColor="#9CA3AF" /> : null}
           <BillRow label="Delivery fee" value={deliveryFee > 0 ? `₹${deliveryFee}` : 'FREE'} labelColor="#9CA3AF" />
           <BillRow label="Platform fee" value={`₹${platformFee}`} labelColor="#9CA3AF" />
           <View style={styles.billDividerLine} />
