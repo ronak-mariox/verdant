@@ -69,6 +69,10 @@ const CATEGORY_FAMILIES: Record<string, CategoryIconFamily> = {
   },
 };
 
+function toImageUri(url: string): { uri: string } {
+  return { uri: /^https?:\/\//.test(url) ? url : `${API_ORIGIN}${url}` };
+}
+
 function slugify(value: string): string {
   return value
     .trim()
@@ -100,7 +104,7 @@ export function resolveCategoryIcon(
   category: { slug?: string; name?: string },
   subcategory?: { id?: string; name?: string; imageUrl?: string | null },
 ): ImageSourcePropType {
-  if (subcategory?.imageUrl) return { uri: `${API_ORIGIN}${subcategory.imageUrl}` };
+  if (subcategory?.imageUrl) return toImageUri(subcategory.imageUrl);
 
   const entry = findCategoryEntry(category.slug, category.name);
   if (!entry) return placeholderImage;
@@ -121,7 +125,7 @@ export function resolveCategoryCoverIcon(category: {
   subcategories?: { id?: string; name?: string; imageUrl?: string | null }[];
 }): ImageSourcePropType {
   const realUrl = category.imageUrl ?? category.subcategories?.[0]?.imageUrl;
-  if (realUrl) return { uri: `${API_ORIGIN}${realUrl}` };
+  if (realUrl) return toImageUri(realUrl);
 
   const entry = findCategoryEntry(category.slug, category.name);
   if (!entry) return placeholderImage;
