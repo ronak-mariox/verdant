@@ -108,8 +108,18 @@ api.interceptors.response.use(
     } catch (refreshError) {
       pendingQueue.forEach((resolveQueued) => resolveQueued(null));
       pendingQueue = [];
-      await clearStoredTokens();
-      forceLogoutListener?.();
+
+      // Only treat this as "the session is genuinely gone" when the server actually
+      // rejected the refresh token (401/403). A network error, timeout, or 5xx here
+      // just means we couldn't refresh right now — the stored refresh token is likely
+      // still perfectly valid, so keep it and let the next attempt (or AuthContext's
+      // own retry loop) try again, instead of forcing a fresh login over what might be
+      // a brief connectivity blip or the backend being momentarily unreachable.
+      const status = axios.isAxiosError(refreshError) ? refreshError.response?.status : undefined;
+      if (status === 401 || status === 403) {
+        await clearStoredTokens();
+        forceLogoutListener?.();
+      }
       return Promise.reject(refreshError);
     } finally {
       isRefreshing = false;
