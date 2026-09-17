@@ -142,18 +142,6 @@ export const saverItems: ProductItem[] = [
 
 export const promoTiles = [img.tile1, img.tile2, img.tile3];
 
-export const rainyItems: ProductItem[] = [
-  { id: 'ry1', image: img.rainy1, title: 'Classic Whole Cashews by Flipkart Grocery', weight: '1 x 200 g', rating: 4.1, price: 242, originalPrice: 290, discountPercent: 17 },
-  { id: 'ry2', image: img.rainy2, title: 'Classic Independence Almonds by Flipkart Grocery', weight: '1 x 1 kg', price: 1255, originalPrice: 1380, discountPercent: 9 },
-  { id: 'ry3', image: img.rainy3, title: 'Bolas Roasted & Salted Pistachios', weight: '1 x 200 g', rating: 4.1, price: 349, originalPrice: 475, discountPercent: 27 },
-  { id: 'ry4', image: img.rainy4, title: 'ProV Select Cashew (Combo Pack, 2*200 g) (400 g) Cashews', weight: '2 x 200 g', rating: 4.1, price: 479, originalPrice: 698, discountPercent: 31 },
-  { id: 'ry5', image: img.rainy5, title: 'ProV California Independence Almonds', weight: '2 x 250 g', rating: 4.2, price: 525, originalPrice: 678, discountPercent: 23 },
-  { id: 'ry6', image: img.rainy6, title: 'ProV Select California Almonds Almonds', weight: '1 x 750 g', rating: 4, price: 978, originalPrice: 1060, discountPercent: 8 },
-  { id: 'ry7', image: img.rainy7, title: 'Happilo Essentials Californian Popular Almonds', weight: '1 x 500 g', rating: 4.3, price: 673, originalPrice: 850, discountPercent: 21 },
-  { id: 'ry8', image: img.rainy8, title: 'ProV Premium California Roasted and Salted Pistachios', weight: '2 x 250 g', rating: 4.3, price: 912, originalPrice: 1020, discountPercent: 11 },
-  { id: 'ry9', image: img.rainy9, title: 'Scorist Popular Whole Cashews', weight: '1 x 1 kg', rating: 4.1, price: 1224, originalPrice: 1799, discountPercent: 32 },
-];
-
 export const banners = {
   topDeals: img.bannerTopdeals,
   promo1: img.banner1,

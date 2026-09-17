@@ -91,7 +91,12 @@ export function CategoryDetailScreen({ navigation, route }: Props) {
   const [categories, setCategories] = useState<RawCategory[]>([]);
   const [rawProducts, setRawProducts] = useState<RawProduct[]>([]);
 
-  const category = categories.find((c) => c.id === categoryId) ?? categories[0] ?? FALLBACK_CATEGORY;
+  // Callers pass either a real category id (tapping a tile in CategoryScreen's grid,
+  // which already has the fetched category objects) or a stable slug (HomeScreen's
+  // featuredPicks/essentialTiles/category-tab links, defined statically in data/home.ts
+  // before any category id is known) — match against both.
+  const category =
+    categories.find((c) => c.id === categoryId || c.slug === categoryId) ?? categories[0] ?? FALLBACK_CATEGORY;
   const otherCategories = categories.filter((c) => c.id !== category.id);
 
   const [activeTab, setActiveTab] = useState<NavTab>('categories');
@@ -109,18 +114,21 @@ export function CategoryDetailScreen({ navigation, route }: Props) {
   }, []);
 
   useEffect(() => {
-    if (!categoryId) return;
+    // Wait for `category` to resolve to a real fetched category (with a real id) before
+    // querying products — querying with a not-yet-resolved id would either 404 or,
+    // worse, silently return an unrelated category's products.
+    if (!category.id) return;
     api
       .get<{ items: RawProduct[] }>('/customer/products', {
         params: {
-          categoryId,
+          categoryId: category.id,
           subcategoryId: activeSubcategory !== 'all' ? activeSubcategory : undefined,
           limit: 50,
         },
       })
       .then(({ data }) => setRawProducts(data.items))
       .catch(() => setRawProducts([]));
-  }, [categoryId, activeSubcategory]);
+  }, [category.id, activeSubcategory]);
 
   const baseProducts = useMemo(() => rawProducts.map(toProductItem), [rawProducts]);
   const filteredProducts = useMemo(() => applyCategoryFilters(baseProducts, filters), [baseProducts, filters]);

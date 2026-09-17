@@ -19,12 +19,11 @@ import {
   featuredPickLinks,
   featuredPicks,
   promoTiles,
-  rainyItems,
-  snackItems,
   storeCards,
   type CategoryLink,
   type ProductItem,
 } from '../data/home';
+import { CATEGORY_TAB_TARGETS } from '../data/categoryTabTargets';
 import type { AuthStackParamList } from '../navigation/types';
 
 interface RawVariant {
@@ -47,6 +46,8 @@ interface RawHomeResponse {
   topDeals: RawProduct[];
   saverItems: RawProduct[];
   essentialItems: RawProduct[];
+  snackItems: RawProduct[];
+  monsoonItems: RawProduct[];
 }
 
 function toProductItem(product: RawProduct): ProductItem {
@@ -92,7 +93,7 @@ export function HomeScreen({ navigation }: Props) {
       .get<RawHomeResponse>('/customer/home')
       .then(({ data }) => {
         setHomeData(data);
-        setRawProducts([...data.topDeals, ...data.saverItems, ...data.essentialItems]);
+        setRawProducts([...data.topDeals, ...data.saverItems, ...data.essentialItems, ...data.snackItems, ...data.monsoonItems]);
       })
       .catch(() => {});
   }, []);
@@ -100,6 +101,8 @@ export function HomeScreen({ navigation }: Props) {
   const topDealItems = homeData ? homeData.topDeals.map(toProductItem) : [];
   const essentialProductItems = homeData ? homeData.essentialItems.map(toProductItem) : [];
   const saverProductItems = homeData ? homeData.saverItems.map(toProductItem) : [];
+  const snackProductItems = homeData ? homeData.snackItems.map(toProductItem) : [];
+  const monsoonProductItems = homeData ? homeData.monsoonItems.map(toProductItem) : [];
 
   const fullWidthHeight = (aspect: number) => screenWidth / aspect;
   const paddedWidth = screenWidth - HORIZONTAL_PADDING * 2;
@@ -114,6 +117,11 @@ export function HomeScreen({ navigation }: Props) {
   const handleAddToCart = (item: ProductItem) => {
     const variantId = rawProducts.find((p) => p.id === item.id)?.variants[0]?.id;
     if (variantId) addItem(item.id, variantId);
+  };
+  const handleCategoryTabChange = (tabId: string) => {
+    setActiveCategory(tabId);
+    const slug = CATEGORY_TAB_TARGETS[tabId];
+    if (slug) navigation.navigate('CategoryDetail', { categoryId: slug });
   };
   const handleTabChange = (tab: NavTab) => {
     setActiveTab(tab);
@@ -140,7 +148,7 @@ export function HomeScreen({ navigation }: Props) {
       />
 
       <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
-        <CategoryTabs data={categoryTabs} activeId={activeCategory} onChange={setActiveCategory} />
+        <CategoryTabs data={categoryTabs} activeId={activeCategory} onChange={handleCategoryTabChange} />
 
         <ImageCardRow data={featuredPicks} cardWidth={116} cardHeight={175} onItemPress={openFeaturedPick} />
 
@@ -158,7 +166,7 @@ export function HomeScreen({ navigation }: Props) {
         <ImageCardRow data={storeCards} cardWidth={116} cardHeight={153} onItemPress={openStore} />
 
         <SectionHeader title="Munch on these snacks!" />
-        <ProductRow data={snackItems} onItemPress={openProduct} onAddPress={handleAddToCart} />
+        <ProductRow data={snackProductItems} onItemPress={openProduct} onAddPress={handleAddToCart} />
 
         <SectionHeader title="Daily essentials" />
         <ImageCardRow data={essentialTiles} cardWidth={83} cardHeight={120} resizeMode="contain" onItemPress={openEssential} />
@@ -198,7 +206,7 @@ export function HomeScreen({ navigation }: Props) {
         </View>
 
         <SectionHeader title="Rainy day specials" />
-        <ProductRow data={rainyItems} onItemPress={openProduct} onAddPress={handleAddToCart} />
+        <ProductRow data={monsoonProductItems} onItemPress={openProduct} onAddPress={handleAddToCart} />
 
         <View style={styles.footerPad}>
           <Image
