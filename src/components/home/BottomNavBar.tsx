@@ -2,6 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NavCategories, NavHome, NavOrders, NavProfile, NavSearch } from '../../assets/icons/homescreen';
+import { fontFamily } from '../../theme';
 
 export type NavTab = 'home' | 'search' | 'categories' | 'orders' | 'profile';
 
@@ -71,7 +72,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 10,
-    fontWeight: '600',
+    fontFamily: fontFamily.bodySemiBold,
     color: '#9CA3AF',
   },
   labelActive: {

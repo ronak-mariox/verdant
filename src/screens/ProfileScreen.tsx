@@ -22,6 +22,7 @@ import type { AuthStackParamList } from '../navigation/types';
 import { useAuth } from '../context/AuthContext';
 import { useCheckout } from '../context/CheckoutContext';
 import { API_ORIGIN, api } from '../services/api';
+import { fontFamily } from '../theme';
 
 const ACTIVE_ORDER_STATUSES = new Set(['placed', 'accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery']);
 
@@ -131,7 +132,7 @@ export function ProfileScreen({ navigation }: Props) {
               </Pressable>
               <Text style={styles.name}>{user?.name || 'Add your name'}</Text>
               {user?.email ? <Text style={styles.email}>{user.email}</Text> : null}
-              <Text style={styles.phone}>+91 {user?.phone}</Text>
+              {user?.phone ? <Text style={styles.phone}>+91 {user.phone}</Text> : null}
 
               <View style={styles.statsCard}>
                 <View style={styles.statCell}>
@@ -329,17 +330,20 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 20,
-    fontWeight: '800',
+    fontFamily: fontFamily.headingBold,
     color: '#1A1A1A',
   },
   email: {
     fontSize: 13,
+    fontFamily: fontFamily.bodyRegular,
     color: '#9CA3AF',
     paddingTop: 2,
   },
   phone: {
     fontSize: 13,
+    fontFamily: fontFamily.bodyRegular,
     color: '#9CA3AF',
+    paddingTop: 2,
   },
   statsCard: {
     flexDirection: 'row',

@@ -1,12 +1,10 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ActionRow, Button, Screen } from '../components';
 import {
   ChevronRight,
-  ChevronRightSmall,
-  ClockIcon,
   HomeIcon,
   LocateIcon,
   MapPinFill,
@@ -15,29 +13,45 @@ import {
   PinOutline,
   SearchIcon,
 } from '../assets/icons';
+import { PlusAddress } from '../assets/icons/checkout';
 import { MapIllustration } from '../assets/images';
 import { colors, fontFamily, radius, shadows, spacing, typography } from '../theme';
 import type { AuthStackParamList } from '../navigation/types';
+import { useAuth } from '../context/AuthContext';
+import { useCheckout } from '../context/CheckoutContext';
+import type { Address } from '../data/checkout';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'LocationSelection'>;
 
-const SAVED_PLACES = [
-  { id: 'home', title: 'Home', subtitle: '12, Elm Street, Sector 4, Bengaluru', icon: <HomeIcon width={19} height={19} /> },
-  { id: 'office', title: 'Office', subtitle: 'WeWork Galaxy, MG Road, Bengaluru', icon: <OfficeIcon width={20} height={16} /> },
-  { id: 'koramangala', title: 'Koramangala', subtitle: '5th Block, Koramangala, Bengaluru', icon: <MapPinFillAlt width={24} height={24} /> },
-];
-
-const RECENT_SEARCHES = [
-  'Indiranagar 100ft Road, Bengaluru',
-  'HSR Layout Sector 2, Bengaluru',
-  'Jayanagar 4th Block, Bengaluru',
-];
+function addressIcon(type: Address['type']) {
+  if (type === 'Home') return <HomeIcon width={19} height={19} />;
+  if (type === 'Work') return <OfficeIcon width={20} height={16} />;
+  return <MapPinFillAlt width={24} height={24} />;
+}
 
 export function LocationSelectionScreen({ navigation }: Props) {
   const [search, setSearch] = useState('');
+  const { isAuthenticated } = useAuth();
+  const { addressList, isLoadingAddresses, setDefaultAddress } = useCheckout();
   const [selected, setSelected] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
-  const canConfirm = selected !== null;
+  const canConfirm = selected !== null && !confirming;
+
+  const handleConfirm = async () => {
+    if (!selected) return;
+    if (isAuthenticated && selected !== 'current-location') {
+      setConfirming(true);
+      try {
+        await setDefaultAddress(selected);
+        navigation.goBack();
+      } finally {
+        setConfirming(false);
+      }
+      return;
+    }
+    navigation.navigate('Login');
+  };
 
   return (
     <Screen edges={['left', 'right']} scrollable>
@@ -92,7 +106,7 @@ export function LocationSelectionScreen({ navigation }: Props) {
       <View style={styles.section}>
         <ActionRow
           title="Use current location"
-          subtitle="Enable GPS for automatic detection"
+          subtitle="Set your location manually on the map"
           leading={<LocateIcon width={18} height={18} />}
           leadingBackgroundColor={colors.brand.primary}
           trailing={<ChevronRight width={18} height={18} />}
@@ -103,42 +117,37 @@ export function LocationSelectionScreen({ navigation }: Props) {
 
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>Saved Places</Text>
-        <View style={styles.list}>
-          {SAVED_PLACES.map((place) => (
+        {!isAuthenticated ? (
+          <Text style={styles.emptyText}>Log in to see your saved addresses</Text>
+        ) : isLoadingAddresses ? (
+          <ActivityIndicator color={colors.brand.primary} style={styles.loader} />
+        ) : (
+          <View style={styles.list}>
+            {addressList.map((address) => (
+              <ActionRow
+                key={address.id}
+                title={address.type}
+                subtitle={address.line2 || address.line1}
+                leading={addressIcon(address.type)}
+                emphasized={selected === address.id}
+                onPress={() => setSelected(address.id)}
+              />
+            ))}
             <ActionRow
-              key={place.id}
-              title={place.title}
-              subtitle={place.subtitle}
-              leading={place.icon}
-              emphasized={selected === place.id}
-              onPress={() => setSelected(place.id)}
+              title="Add new address"
+              leading={<PlusAddress width={16} height={16} />}
+              trailing={<ChevronRight width={18} height={18} />}
+              onPress={() => navigation.navigate('AddressForm', { mode: 'add' })}
             />
-          ))}
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionLabel}>Recent Searches</Text>
-        <View style={styles.recentList}>
-          {RECENT_SEARCHES.map((item) => (
-            <View key={item} style={styles.recentRow}>
-              <View style={styles.recentIconWrap}>
-                <ClockIcon width={16} height={16} />
-              </View>
-              <Text style={styles.recentText} numberOfLines={1}>
-                {item}
-              </Text>
-              <ChevronRightSmall width={16} height={16} />
-            </View>
-          ))}
-        </View>
+          </View>
+        )}
       </View>
 
       <View style={styles.footer}>
         <Button
           label="Confirm Location"
           disabled={!canConfirm}
-          onPress={() => navigation.navigate('Login')}
+          onPress={handleConfirm}
         />
       </View>
     </Screen>
@@ -265,30 +274,12 @@ const styles = StyleSheet.create({
   list: {
     gap: spacing.xs,
   },
-  recentList: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border.light,
-  },
-  recentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border.light,
-  },
-  recentIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.sm,
-    backgroundColor: colors.background.surfaceMuted,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  recentText: {
-    flex: 1,
+  emptyText: {
     ...typography.bodySmall,
-    color: colors.text.listItem,
+    color: colors.text.subtle,
+  },
+  loader: {
+    paddingVertical: spacing.md,
   },
   footer: {
     padding: spacing.xl,

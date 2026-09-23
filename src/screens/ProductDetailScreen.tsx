@@ -1,7 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
+  FlatList,
   Image,
+  type NativeSyntheticEvent,
+  type NativeScrollEvent,
   Pressable,
   ScrollView,
   Share,
@@ -69,6 +73,7 @@ interface RawProduct {
   barcode?: string;
   hsnCode?: string;
   countryOfOrigin?: string;
+  rating?: RatingSummary;
 }
 
 interface RatingSummary {
@@ -76,10 +81,19 @@ interface RatingSummary {
   count: number;
 }
 
+interface RawReview {
+  id: string;
+  customerName: string;
+  rating: number;
+  comment?: string;
+  createdAt: string;
+}
+
 interface ProductDetailResponse {
   product: RawProduct;
   similar: RawProduct[];
   rating: RatingSummary;
+  reviews: RawReview[];
   isWishlisted: boolean;
 }
 
@@ -103,10 +117,16 @@ function formatRatingCount(count: number): string {
   return count.toLocaleString('en-IN');
 }
 
+function starsFromAvg(avg: number): string {
+  const filled = Math.round(avg);
+  return '★★★★★'.slice(0, filled) + '☆☆☆☆☆'.slice(filled);
+}
+
 function toSimilarDisplay(product: RawProduct): SimilarProduct {
   const variant = product.variants[0];
   const discountPercent =
     variant && variant.mrp > 0 ? Math.round(((variant.mrp - variant.price) / variant.mrp) * 100) : 0;
+  const rating = product.rating;
   return {
     id: product.id,
     image: resolveProductImage(product.images[0]),
@@ -117,8 +137,8 @@ function toSimilarDisplay(product: RawProduct): SimilarProduct {
     price: variant?.price ?? 0,
     mrp: variant?.mrp ?? 0,
     discountLabel: discountPercent > 0 ? `${discountPercent}% OFF on MRP` : '',
-    rating: '★★★★☆',
-    reviews: '',
+    rating: rating && rating.count > 0 ? starsFromAvg(rating.avg) : '',
+    reviews: rating && rating.count > 0 ? formatRatingCount(rating.count) : '',
     deliveryTime: '10 mins',
   };
 }
@@ -131,6 +151,8 @@ export function ProductDetailScreen({ navigation, route }: Props) {
   const [quantity, setQuantity] = useState(1);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [isWishlisted, setIsWishlisted] = useState(false);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const heroWidth = useRef(Dimensions.get('window').width).current;
   const { itemCount, items, addItem } = useCart();
   const { addressList, selectedAddressId } = useCheckout();
   const cartThumbItems = items.slice(0, 3);
@@ -144,6 +166,7 @@ export function ProductDetailScreen({ navigation, route }: Props) {
     setLoadError(false);
     setSelectedVariantId(null);
     setQuantity(1);
+    setActiveImageIndex(0);
     api
       .get<ProductDetailResponse>(`/customer/products/${productId}`)
       .then(({ data }) => {
@@ -182,7 +205,7 @@ export function ProductDetailScreen({ navigation, route }: Props) {
     );
   }
 
-  const { product, similar, rating } = data;
+  const { product, similar, rating, reviews } = data;
   const variantData: Variant[] = product.variants;
   const selectedVariant = variantData.find((v) => v.id === selectedVariantId) ?? variantData[0];
   const discountPercent =
@@ -190,7 +213,7 @@ export function ProductDetailScreen({ navigation, route }: Props) {
       ? Math.round(((selectedVariant.mrp - selectedVariant.price) / selectedVariant.mrp) * 100)
       : 0;
   const savings = selectedVariant ? selectedVariant.mrp - selectedVariant.price : 0;
-  const heroImage = resolveProductImage(product.images[0]);
+  const productImages: (string | undefined)[] = product.images.length > 0 ? product.images : [undefined];
   const subtitle = product.description || [product.brand, selectedVariant?.label].filter(Boolean).join(' • ');
   const similarRow1 = similar.slice(0, 3).map(toSimilarDisplay);
   const similarRow2 = similar.slice(3, 6).map(toSimilarDisplay);
@@ -199,6 +222,11 @@ export function ProductDetailScreen({ navigation, route }: Props) {
   const deliveryAddressSummary = deliveryAddress
     ? { label: deliveryAddress.type.toUpperCase(), text: [deliveryAddress.line1, deliveryAddress.line2].filter(Boolean).join(', ') }
     : null;
+
+  const handleHeroScrollEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const index = Math.round(event.nativeEvent.contentOffset.x / heroWidth);
+    setActiveImageIndex(index);
+  };
 
   const handleAddToCart = () => {
     if (!selectedVariant) return;
@@ -249,7 +277,20 @@ export function ProductDetailScreen({ navigation, route }: Props) {
 
       <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
         <View style={styles.heroWrap}>
-          <Image source={heroImage} style={styles.heroImage} resizeMode="contain" />
+          <FlatList
+            style={styles.heroList}
+            data={productImages}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            keyExtractor={(item, index) => item ?? `placeholder-${index}`}
+            onMomentumScrollEnd={handleHeroScrollEnd}
+            renderItem={({ item }) => (
+              <View style={[styles.heroSlide, { width: heroWidth }]}>
+                <Image source={resolveProductImage(item)} style={styles.heroImage} resizeMode="contain" />
+              </View>
+            )}
+          />
           {rating.count > 0 ? (
             <View style={styles.ratingBadge}>
               <StarBold width={16} height={16} />
@@ -258,11 +299,13 @@ export function ProductDetailScreen({ navigation, route }: Props) {
               </Text>
             </View>
           ) : null}
-          <View style={styles.pageDots}>
-            {[0, 1, 2].map((i) => (
-              <View key={i} style={[styles.dot, i === 0 && styles.dotActive]} />
-            ))}
-          </View>
+          {productImages.length > 1 ? (
+            <View style={styles.pageDots}>
+              {productImages.map((_, i) => (
+                <View key={i} style={[styles.dot, i === activeImageIndex && styles.dotActive]} />
+              ))}
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.body}>
@@ -348,7 +391,12 @@ export function ProductDetailScreen({ navigation, route }: Props) {
           </View>
 
           {detailsExpanded ? (
-            <ProductDetailsAccordion highlights={highlights} address={deliveryAddressSummary} rating={rating} />
+            <ProductDetailsAccordion
+              highlights={highlights}
+              address={deliveryAddressSummary}
+              rating={rating}
+              reviews={reviews}
+            />
           ) : null}
 
           <View style={styles.infoRow}>
@@ -547,6 +595,14 @@ const styles = StyleSheet.create({
   },
   heroWrap: {
     height: 229,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroList: {
+    width: '100%',
+    height: '100%',
+  },
+  heroSlide: {
     alignItems: 'center',
     justifyContent: 'center',
   },

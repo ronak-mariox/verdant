@@ -2,6 +2,7 @@ import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { HomePin } from '../../assets/icons/product';
 import { featureCod, featureDoorstep, featureNoReturns } from '../../assets/images/product/details';
+import { formatRelativeTime } from '../../utils/relativeTime';
 
 export interface ProductHighlight {
   label: string;
@@ -18,6 +19,14 @@ export interface RatingSummary {
   count: number;
 }
 
+export interface ProductReview {
+  id: string;
+  customerName: string;
+  rating: number;
+  comment?: string;
+  createdAt: string;
+}
+
 const FEATURES = [
   { image: featureDoorstep, label: 'Doorstep\ncancellation' },
   { image: featureNoReturns, label: 'No\nreturns' },
@@ -32,13 +41,19 @@ function ratingQualityLabel(avg: number): string {
   return 'Needs Improvement';
 }
 
+function reviewStars(rating: number): string {
+  const filled = Math.round(rating);
+  return '★★★★★'.slice(0, filled) + '☆☆☆☆☆'.slice(filled);
+}
+
 interface Props {
   highlights: ProductHighlight[];
   address: DeliveryAddressSummary | null;
   rating: RatingSummary;
+  reviews: ProductReview[];
 }
 
-export function ProductDetailsAccordion({ highlights, address, rating }: Props) {
+export function ProductDetailsAccordion({ highlights, address, rating, reviews }: Props) {
   return (
     <View style={styles.wrap}>
       {highlights.length > 0 ? (
@@ -98,6 +113,23 @@ export function ProductDetailsAccordion({ highlights, address, rating }: Props) 
             ? `Based on ${rating.count.toLocaleString('en-IN')} rating${rating.count === 1 ? '' : 's'} by Verified Buyers`
             : 'No ratings yet — be the first to receive this product'}
         </Text>
+
+        {reviews.length > 0 ? (
+          <View style={styles.reviewsList}>
+            {reviews.map((review) => (
+              <View key={review.id} style={styles.reviewItem}>
+                <View style={styles.reviewHeader}>
+                  <Text style={styles.reviewerName}>{review.customerName}</Text>
+                  <Text style={styles.reviewDate}>{formatRelativeTime(review.createdAt)}</Text>
+                </View>
+                <Text style={styles.reviewStars}>{reviewStars(review.rating)}</Text>
+                {review.comment ? <Text style={styles.reviewComment}>{review.comment}</Text> : null}
+              </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.noReviewsText}>No reviews yet</Text>
+        )}
       </View>
     </View>
   );
@@ -249,5 +281,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6A7282',
     paddingTop: 4,
+  },
+  reviewsList: {
+    marginTop: 12,
+    gap: 12,
+  },
+  reviewItem: {
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+    paddingTop: 12,
+  },
+  reviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  reviewerName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#333333',
+  },
+  reviewDate: {
+    fontSize: 11,
+    color: '#9CA3AF',
+  },
+  reviewStars: {
+    fontSize: 13,
+    color: '#F59E0B',
+    paddingTop: 2,
+  },
+  reviewComment: {
+    fontSize: 13,
+    color: '#4B5563',
+    paddingTop: 4,
+  },
+  noReviewsText: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    paddingTop: 8,
   },
 });
