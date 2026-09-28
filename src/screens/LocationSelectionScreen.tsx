@@ -50,6 +50,10 @@ export function LocationSelectionScreen({ navigation }: Props) {
       }
       return;
     }
+    if (isAuthenticated) {
+      navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+      return;
+    }
     navigation.navigate('Login');
   };
 

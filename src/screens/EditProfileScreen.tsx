@@ -21,7 +21,8 @@ import { EditProfilePencilIcon } from '../assets/icons/profile';
 import { avatar as defaultAvatar } from '../assets/images/profile';
 import type { AuthStackParamList } from '../navigation/types';
 import { useAuth } from '../context/AuthContext';
-import { api, API_ORIGIN, getErrorMessage, getFieldErrors } from '../services/api';
+import { api, getErrorMessage, getFieldErrors } from '../services/api';
+import { absoluteUrl } from '../config';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'EditProfile'>;
 
@@ -74,7 +75,7 @@ export function EditProfileScreen({ navigation }: Props) {
 
   const phoneDisplay = user?.phone ?? '';
   const avatarSource = useMemo(
-    () => (user?.avatarUrl ? { uri: `${API_ORIGIN}${user.avatarUrl}` } : defaultAvatar),
+    () => (user?.avatarUrl ? { uri: absoluteUrl(user.avatarUrl) } : defaultAvatar),
     [user?.avatarUrl],
   );
 

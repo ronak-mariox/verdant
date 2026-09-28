@@ -1,46 +1,45 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { BackIcon, RefundWalletIcon } from '../assets/icons/order';
+import { LoadErrorView } from '../components/order/LoadErrorView';
 import { OrderMiniCard } from '../components/order/OrderMiniCard';
 import { cancellationPolicy, cancellationReasons } from '../data/orders';
-import { api, getErrorMessage } from '../services/api';
+import { api, getErrorMessage, getErrorStatus } from '../services/api';
 import { resolveProductImage } from '../utils/productImage';
 import type { AuthStackParamList } from '../navigation/types';
+import { formatOrderDate, isCustomerCancellable, type RawOrder } from '../types/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'CancelOrder'>;
-
-interface RawOrderItem {
-  productId: string;
-  variantId: string;
-  name: string;
-  variantLabel: string;
-  imageUrl?: string;
-  price: number;
-  mrp: number;
-  quantity: number;
-  subtotal: number;
-}
-
-interface RawOrder {
-  id: string;
-  orderNumber: string;
-  items: RawOrderItem[];
-  pricing: { itemsTotal: number; taxTotal: number; deliveryFee: number; platformFee: number; discount: number; grandTotal: number };
-  paymentMethod: 'cod' | 'online';
-  placedAt: string;
-}
 
 export function CancelOrderScreen({ navigation, route }: Props) {
   const { orderId } = route.params;
   const [order, setOrder] = useState<RawOrder | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    api.get<RawOrder>(`/customer/orders/${orderId}`).then(({ data }) => setOrder(data));
+  const load = useCallback(() => {
+    setLoaded(false);
+    setError(null);
+    api
+      .get<RawOrder>(`/customer/orders/${orderId}`)
+      .then(({ data }) => setOrder(data))
+      .catch((err) => setError(getErrorMessage(err)))
+      .finally(() => setLoaded(true));
   }, [orderId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    if (order && !isCustomerCancellable(order.status)) {
+      navigation.replace('CancelIneligible', { orderId: order.id });
+    }
+  }, [navigation, order]);
 
   const handleConfirm = async () => {
     if (!selectedReason || submitting) return;
@@ -48,20 +47,28 @@ export function CancelOrderScreen({ navigation, route }: Props) {
     setSubmitting(true);
     try {
       await api.post(`/customer/orders/${orderId}/cancel`, { reason: reason?.title });
-      navigation.navigate('OrderCancelled', { orderId });
+      navigation.replace('OrderCancelled', { orderId });
     } catch (err) {
+      if (getErrorStatus(err) === 409) {
+        navigation.replace('CancelIneligible', { orderId });
+        return;
+      }
       Alert.alert('Could not cancel order', getErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
   };
 
-  if (!order) {
+  if (!loaded) {
     return (
       <View style={styles.loadingWrap}>
         <ActivityIndicator color="#1CA672" size="large" />
       </View>
     );
+  }
+
+  if (error || !order) {
+    return <LoadErrorView message={error ?? 'Order not found'} onRetry={load} onBack={() => navigation.goBack()} />;
   }
 
   const isCod = order.paymentMethod === 'cod';
@@ -76,7 +83,7 @@ export function CancelOrderScreen({ navigation, route }: Props) {
           </Pressable>
           <View style={styles.headerTitleWrap}>
             <Text style={styles.headerTitle}>Cancel Order</Text>
-            <Text style={styles.headerSubtitle}>Order will be cancelled and refund initiated</Text>
+            <Text style={styles.headerSubtitle}>{isCod ? 'Order will be cancelled — nothing to refund' : 'Order will be cancelled and refund initiated'}</Text>
           </View>
         </View>
       </SafeAreaView>
@@ -85,7 +92,7 @@ export function CancelOrderScreen({ navigation, route }: Props) {
         <View style={styles.body}>
           <OrderMiniCard
             orderNumber={order.orderNumber}
-            date={new Date(order.placedAt).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
+            date={formatOrderDate(order.placedAt)}
             itemCount={order.items.length}
             total={order.pricing.grandTotal}
             thumbs={order.items.slice(0, 3).map((item) => resolveProductImage(item.imageUrl))}

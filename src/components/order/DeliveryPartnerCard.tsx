@@ -1,25 +1,42 @@
 import React from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { CallIcon, ChatIcon, PartnerStarIcon } from '../../assets/icons/order';
+import type { RawDriver } from '../../types/api';
 
-export function DeliveryPartnerCard({ onChatPress }: { onChatPress?: () => void }) {
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('');
+}
+
+export function DeliveryPartnerCard({ driver, onChatPress }: { driver: RawDriver; onChatPress?: () => void }) {
+  const vehicle = [driver.vehicleType, driver.vehicleNumber].filter(Boolean).join(' · ');
   return (
     <View style={styles.card}>
       <View style={styles.avatar}>
-        <Text style={styles.avatarText}>RK</Text>
+        <Text style={styles.avatarText}>{initials(driver.name) || '?'}</Text>
       </View>
       <View style={styles.body}>
-        <Text style={styles.name}>Rajesh Kumar</Text>
+        <Text style={styles.name}>{driver.name}</Text>
         <View style={styles.ratingRow}>
-          <PartnerStarIcon width={11} height={11} />
-          <Text style={styles.ratingValue}>4.8</Text>
-          <Text style={styles.ratingTrips}>· 1,236 trips</Text>
+          {driver.rating != null ? (
+            <>
+              <PartnerStarIcon width={11} height={11} />
+              <Text style={styles.ratingValue}>{driver.rating.toFixed(1)}</Text>
+            </>
+          ) : null}
+          {vehicle ? <Text style={styles.ratingTrips}>{driver.rating != null ? `· ${vehicle}` : vehicle}</Text> : null}
         </View>
       </View>
       <View style={styles.actions}>
-        <Pressable style={styles.callButton} onPress={() => Linking.openURL('tel:+919876500001')} hitSlop={4}>
-          <CallIcon width={16} height={16} />
-        </Pressable>
+        {driver.phone ? (
+          <Pressable style={styles.callButton} onPress={() => Linking.openURL(`tel:${driver.phone}`)} hitSlop={4}>
+            <CallIcon width={16} height={16} />
+          </Pressable>
+        ) : null}
         <Pressable style={styles.chatButton} onPress={onChatPress} hitSlop={4}>
           <ChatIcon width={16} height={16} />
         </Pressable>

@@ -64,7 +64,7 @@ export function CreateAccountScreen({ navigation, route }: Props) {
           style={[styles.input, fieldErrors.name && styles.inputError]}
           value={name}
           onChangeText={setName}
-          placeholder="e.g. Priya Sharma"
+          placeholder="Enter your full name"
           placeholderTextColor={colors.text.inputPlaceholder}
           autoFocus
           autoCapitalize="words"

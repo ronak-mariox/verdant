@@ -1,85 +1,89 @@
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Image, Pressable, RefreshControl, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ChevronDownIcon, HelpIcon, IssueWarningIcon } from '../assets/icons/order';
+import { ChevronDownIcon, HelpIcon } from '../assets/icons/order';
 import { map } from '../assets/images/order';
 import { DeliveryPartnerCard } from '../components/order/DeliveryPartnerCard';
+import { LoadErrorView } from '../components/order/LoadErrorView';
 import { OrderProgressTracker } from '../components/order/OrderProgressTracker';
-import { api } from '../services/api';
+import { api, getErrorMessage } from '../services/api';
 import type { AuthStackParamList } from '../navigation/types';
+import {
+  ORDER_STATUS_LABELS,
+  ORDER_STATUS_STEP,
+  ORDER_STATUS_TEXT,
+  formatOrderDate,
+  isCustomerCancellable,
+  isTerminalStatus,
+  unwrapList,
+  type RawOrder,
+} from '../types/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'OrderTracking'>;
 
-type BackendStatus =
-  | 'placed'
-  | 'accepted'
-  | 'preparing'
-  | 'ready_for_pickup'
-  | 'out_for_delivery'
-  | 'delivered'
-  | 'cancelled'
-  | 'rejected';
-
-interface RawOrder {
-  id: string;
-  orderNumber: string;
-  items: { productId: string; variantId: string }[];
-  pricing: { grandTotal: number };
-  status: BackendStatus;
-  placedAt: string;
-  driverId?: string | null;
-}
-
-const STATUS_LABELS: Record<BackendStatus, string> = {
-  placed: 'Order placed',
-  accepted: 'Accepted',
-  preparing: 'Preparing',
-  ready_for_pickup: 'Ready for pickup',
-  out_for_delivery: 'Out for delivery',
-  delivered: 'Delivered',
-  cancelled: 'Cancelled',
-  rejected: 'Rejected',
-};
-
-const STATUS_INDEX: Partial<Record<BackendStatus, number>> = {
-  placed: 0,
-  accepted: 1,
-  preparing: 1,
-  ready_for_pickup: 2,
-  out_for_delivery: 3,
-  delivered: 4,
-};
+const POLL_INTERVAL_MS = 15000;
 
 export function OrderTrackingScreen({ navigation, route }: Props) {
   const paramOrderId = route.params?.orderId;
-  const variant = route.params?.variant ?? 'onTime';
-  const isDelayed = variant === 'delayed';
-  const accent = isDelayed ? '#F59E0B' : '#1CA672';
 
   const [order, setOrder] = useState<RawOrder | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    if (paramOrderId) {
+      const { data } = await api.get<RawOrder>(`/customer/orders/${paramOrderId}`);
+      return data;
+    }
+    const { data } = await api.get<RawOrder[]>('/customer/orders');
+    const orders = unwrapList(data);
+    // Prefer something still in flight; otherwise fall back to the most recent order in "completed" mode.
+    return orders.find((o) => !isTerminalStatus(o.status)) ?? orders[0] ?? null;
+  }, [paramOrderId]);
 
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      try {
-        if (paramOrderId) {
-          const { data } = await api.get<RawOrder>(`/customer/orders/${paramOrderId}`);
-          if (!cancelled) setOrder(data);
-        } else {
-          const { data } = await api.get<RawOrder[]>('/customer/orders');
-          if (!cancelled) setOrder(data[0] ?? null);
-        }
-      } finally {
+    setLoaded(false);
+    setError(null);
+    load()
+      .then((data) => {
+        if (!cancelled) setOrder(data);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(getErrorMessage(err));
+      })
+      .finally(() => {
         if (!cancelled) setLoaded(true);
-      }
-    }
-    load();
+      });
     return () => {
       cancelled = true;
     };
-  }, [paramOrderId]);
+  }, [load]);
+
+  const isActive = !!order && !isTerminalStatus(order.status);
+
+  useEffect(() => {
+    if (!isActive) return;
+    const timer = setInterval(() => {
+      load()
+        .then((data) => setOrder(data))
+        .catch(() => {});
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [isActive, load]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    load()
+      .then((data) => {
+        setOrder(data);
+        setError(null);
+      })
+      .catch((err) => setError(getErrorMessage(err)))
+      .finally(() => setRefreshing(false));
+  }, [load]);
 
   if (!loaded) {
     return (
@@ -87,6 +91,10 @@ export function OrderTrackingScreen({ navigation, route }: Props) {
         <ActivityIndicator color="#1CA672" size="large" />
       </View>
     );
+  }
+
+  if (error && !order) {
+    return <LoadErrorView message={error} onRetry={onRefresh} onBack={() => navigation.goBack()} />;
   }
 
   if (!order) {
@@ -97,78 +105,84 @@ export function OrderTrackingScreen({ navigation, route }: Props) {
     );
   }
 
-  const activeIndex = order.status === 'delivered' ? 4 : STATUS_INDEX[order.status] ?? 0;
-  const placedDate = new Date(order.placedAt);
-  const etaDate = new Date(placedDate.getTime() + 20 * 60 * 1000);
-  const etaMinutes = Math.max(0, Math.round((etaDate.getTime() - Date.now()) / 60000));
-  const etaByText = etaDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  const shortDateText = placedDate.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+  const isTerminal = isTerminalStatus(order.status);
+  const isCancelledOrRejected = order.status === 'cancelled' || order.status === 'rejected';
+  const activeIndex = ORDER_STATUS_STEP[order.status] ?? 0;
+  const accent = isCancelledOrRejected ? '#DC2626' : '#1CA672';
+  const showOtp = order.status === 'out_for_delivery' && !!order.deliveryOtp;
+
+  const handleCancelPress = () => {
+    if (isCustomerCancellable(order.status)) {
+      navigation.navigate('CancelOrder', { orderId: order.id });
+    } else {
+      navigation.navigate('CancelIneligible', { orderId: order.id });
+    }
+  };
 
   return (
     <View style={styles.flex}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
-      <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
-        <SafeAreaView edges={['top']} style={isDelayed ? styles.delayedHeaderSafe : styles.headerSafe}>
-          {isDelayed ? (
-            <View style={styles.delayedBanner}>
-              <View style={styles.delayedIconWrap}>
-                <IssueWarningIcon width={18} height={18} />
-              </View>
-              <View style={styles.delayedTextWrap}>
-                <Text style={styles.delayedTitle}>Your order is running late</Text>
-                <Text style={styles.delayedSubtitle}>Heavy traffic on Sector 62 Expressway</Text>
-              </View>
+      <ScrollView
+        style={styles.flex}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#1CA672" />}
+      >
+        <SafeAreaView edges={['top']} style={styles.headerSafe}>
+          <View style={styles.headerRow}>
+            <View style={styles.flex}>
+              <Text style={[styles.statusTitle, { color: accent }]}>{ORDER_STATUS_LABELS[order.status]}</Text>
+              <Text style={styles.statusText}>{ORDER_STATUS_TEXT[order.status]}</Text>
+              <Text style={styles.placedText}>Placed {formatOrderDate(order.placedAt)}</Text>
             </View>
-          ) : (
-            <View style={styles.headerRow}>
-              <View>
-                <Text style={styles.arrivingLabel}>ARRIVING IN</Text>
-                <View style={styles.etaRow}>
-                  <Text style={[styles.etaValue, { color: accent }]}>{etaMinutes}</Text>
-                  <Text style={[styles.etaUnit, { color: accent }]}>mins</Text>
-                </View>
-                <Text style={styles.etaBy}>By {etaByText} · {shortDateText}</Text>
+            <View style={styles.headerRight}>
+              <View style={styles.statusPill}>
+                <View style={[styles.statusDot, { backgroundColor: accent }]} />
+                <Text style={styles.statusPillText}>{ORDER_STATUS_LABELS[order.status]}</Text>
               </View>
-              <View style={styles.headerRight}>
-                <View style={styles.statusPill}>
-                  <View style={styles.statusDot} />
-                  <Text style={styles.statusPillText}>{STATUS_LABELS[order.status]}</Text>
-                </View>
+              <Pressable onPress={() => navigation.navigate('OrderDetails', { orderId: order.id })} hitSlop={6}>
                 <Text style={styles.orderIdLink}>Order {order.orderNumber} →</Text>
-              </View>
+              </Pressable>
             </View>
-          )}
+          </View>
         </SafeAreaView>
 
-        <View style={styles.mapWrap}>
-          <Image source={map} style={styles.mapImage} resizeMode="cover" />
-          <View style={styles.liveBadge}>
-            <View style={[styles.liveDot, isDelayed && styles.delayedDot]} />
-            <Text style={styles.liveBadgeText}>{isDelayed ? 'DELAYED' : 'LIVE'}</Text>
+        {showOtp ? (
+          <View style={styles.otpCard}>
+            <Text style={styles.otpLabel}>DELIVERY OTP</Text>
+            <Text style={styles.otpValue}>{order.deliveryOtp}</Text>
+            <Text style={styles.otpHint}>Share this OTP with your delivery partner to receive your order</Text>
           </View>
-          <View style={styles.mapFade} />
-        </View>
+        ) : null}
 
-        <View style={styles.trackerSection}>
-          <OrderProgressTracker activeIndex={activeIndex} color={accent} />
-          {isDelayed ? (
-            <Text style={styles.delayedEta}>~28 mins away · Updated 2:43 PM</Text>
-          ) : (
+        {!isTerminal ? (
+          <View style={styles.mapWrap}>
+            <Image source={map} style={styles.mapImage} resizeMode="cover" />
+            <View style={styles.mapFade} />
+          </View>
+        ) : null}
+
+        {isCancelledOrRejected ? (
+          <Text style={styles.terminalNote}>
+            {order.cancelReason ? `Reason: ${order.cancelReason}` : ORDER_STATUS_TEXT[order.status]}
+          </Text>
+        ) : (
+          <View style={styles.trackerSection}>
+            <OrderProgressTracker activeIndex={activeIndex} color={accent} />
             <View style={styles.onWayRow}>
-              <View style={styles.onWayDot} />
-              <Text style={styles.onWayText}>Your order is on the way!</Text>
+              <View style={[styles.onWayDot, { backgroundColor: accent }]} />
+              <Text style={styles.onWayText}>{ORDER_STATUS_TEXT[order.status]}</Text>
             </View>
-          )}
-        </View>
+          </View>
+        )}
 
         <View style={styles.divider} />
 
-        {order.driverId ? (
+        {order.driver ? (
           <>
             <View style={styles.partnerSection}>
               <Text style={styles.sectionLabel}>DELIVERY PARTNER</Text>
               <View style={styles.partnerCardWrap}>
-                <DeliveryPartnerCard onChatPress={() => navigation.navigate('SupportHome')} />
+                <DeliveryPartnerCard driver={order.driver} onChatPress={() => navigation.navigate('SupportHome')} />
               </View>
             </View>
 
@@ -183,7 +197,7 @@ export function OrderTrackingScreen({ navigation, route }: Props) {
           <View style={styles.summaryLeft}>
             <Text style={styles.summaryTitle}>Order summary</Text>
             <Text style={styles.summarySubtitle}>
-              ({order.items.length} items · ₹{order.pricing.grandTotal})
+              ({order.items.length} {order.items.length === 1 ? 'item' : 'items'} · ₹{order.pricing.grandTotal})
             </Text>
           </View>
           <ChevronDownIcon width={16} height={16} />
@@ -191,37 +205,22 @@ export function OrderTrackingScreen({ navigation, route }: Props) {
 
         <View style={styles.divider} />
 
-        {isDelayed ? (
-          <View style={styles.actionsSection}>
-            <Pressable style={styles.contactSupportButton} onPress={() => navigation.navigate('SupportHome')}>
-              <Text style={styles.contactSupportText}>Contact Support</Text>
-            </Pressable>
-            <Pressable
-              style={styles.cancelLinkWrap}
-              onPress={() => navigation.navigate('CancelOrder', { orderId: order.id })}
-            >
+        <View style={styles.helpSection}>
+          <Pressable style={styles.helpRow} onPress={() => navigation.navigate('SupportHome')}>
+            <View style={styles.helpIconWrap}>
+              <HelpIcon width={16} height={16} />
+            </View>
+            <View style={styles.helpTextWrap}>
+              <Text style={styles.helpTitle}>Need help?</Text>
+              <Text style={styles.helpSubtitle}>Call or email our support team</Text>
+            </View>
+          </Pressable>
+          {!isTerminal ? (
+            <Pressable style={styles.cancelLinkWrap} onPress={handleCancelPress}>
               <Text style={styles.cancelLink}>Cancel order</Text>
             </Pressable>
-          </View>
-        ) : (
-          <View style={styles.helpSection}>
-            <Pressable style={styles.helpRow} onPress={() => navigation.navigate('SupportHome')}>
-              <View style={styles.helpIconWrap}>
-                <HelpIcon width={16} height={16} />
-              </View>
-              <View style={styles.helpTextWrap}>
-                <Text style={styles.helpTitle}>Need help?</Text>
-                <Text style={styles.helpSubtitle}>Chat or call our support team</Text>
-              </View>
-            </Pressable>
-            <Pressable
-              style={styles.cancelLinkWrap}
-              onPress={() => navigation.navigate('CancelOrder', { orderId: order.id })}
-            >
-              <Text style={styles.cancelLink}>Cancel order</Text>
-            </Pressable>
-          </View>
-        )}
+          ) : null}
+        </View>
       </ScrollView>
     </View>
   );
@@ -243,30 +242,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 16,
-  },
-  arrivingLabel: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: '#9CA3AF',
-    letterSpacing: 0.5,
-  },
-  etaRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 6,
-  },
-  etaValue: {
-    fontSize: 42,
-    fontWeight: '900',
-  },
-  etaUnit: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  etaBy: {
-    fontSize: 12,
-    color: '#6B7280',
-    paddingTop: 2,
   },
   headerRight: {
     alignItems: 'flex-end',
@@ -299,39 +274,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#3B82F6',
   },
-  delayedHeaderSafe: {
-    backgroundColor: '#FFFBEB',
-    borderBottomWidth: 1,
-    borderBottomColor: '#FDE68A',
-  },
-  delayedBanner: {
-    flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 16,
-  },
-  delayedIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#FEF3C7',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  delayedTextWrap: {
-    flex: 1,
-  },
-  delayedTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#92400E',
-  },
-  delayedSubtitle: {
-    fontSize: 12,
-    color: '#B45309',
-    paddingTop: 2,
-  },
   mapWrap: {
     height: 196,
     backgroundColor: '#EAF5EC',
@@ -340,32 +282,6 @@ const styles = StyleSheet.create({
   mapImage: {
     width: '100%',
     height: '100%',
-  },
-  liveBadge: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  liveDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#1CA672',
-  },
-  delayedDot: {
-    backgroundColor: '#F59E0B',
-  },
-  liveBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#374151',
   },
   mapFade: {
     position: 'absolute',
@@ -399,13 +315,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#1A1A1A',
-  },
-  delayedEta: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#92400E',
-    paddingTop: 12,
-    paddingHorizontal: 4,
   },
   divider: {
     height: 8,
@@ -491,23 +400,54 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#9CA3AF',
   },
-  actionsSection: {
-    backgroundColor: '#FFFFFF',
+  statusTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: '#1A1A1A',
+  },
+  statusText: {
+    fontSize: 13,
+    color: '#6B7280',
+    paddingTop: 4,
+  },
+  placedText: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    paddingTop: 2,
+  },
+  otpCard: {
+    marginHorizontal: 16,
+    marginTop: 16,
     padding: 16,
-  },
-  contactSupportButton: {
-    height: 48,
     borderRadius: 16,
-    borderWidth: 1.5,
-    borderColor: '#F59E0B',
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
     alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 8,
   },
-  contactSupportText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#F59E0B',
+  otpLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#047857',
+    letterSpacing: 0.5,
+  },
+  otpValue: {
+    fontSize: 34,
+    fontWeight: '900',
+    color: '#065F46',
+    letterSpacing: 8,
+    paddingTop: 6,
+  },
+  otpHint: {
+    fontSize: 12,
+    color: '#047857',
+    textAlign: 'center',
+    paddingTop: 6,
+  },
+  terminalNote: {
+    fontSize: 13,
+    color: '#6B7280',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
 });

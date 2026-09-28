@@ -93,7 +93,7 @@ export function AddressScreen({ navigation }: Props) {
                     <View style={styles.footerRow}>
                       <View style={styles.footerLeft}>
                         <View style={styles.footerDot} />
-                        <Text style={styles.footerText}>Delivery in 9 mins</Text>
+                        <Text style={styles.footerText}>Selected address</Text>
                       </View>
                       <Pressable
                         style={styles.deliverButton}

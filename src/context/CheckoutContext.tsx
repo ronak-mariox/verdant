@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from '../services/api';
-import type { Address, DeliverySpeedId, PaymentMethodId } from '../data/checkout';
+import type { Address, PaymentMethodId } from '../data/checkout';
 import { useAuth } from './AuthContext';
 
 interface RawAddress {
@@ -65,10 +65,6 @@ interface CheckoutContextValue {
   removeAddress: (id: string) => Promise<void>;
   setDefaultAddress: (id: string) => Promise<void>;
   refreshAddresses: () => Promise<void>;
-  deliverySpeed: DeliverySpeedId;
-  setDeliverySpeed: (id: DeliverySpeedId) => void;
-  deliverySlot: string;
-  setDeliverySlot: (slot: string) => void;
   instructions: string;
   setInstructions: (value: string) => void;
   paymentMethod: PaymentMethodId;
@@ -82,10 +78,8 @@ export function CheckoutProvider({ children }: { children: React.ReactNode }) {
   const [addressList, setAddressList] = useState<Address[]>([]);
   const [isLoadingAddresses, setIsLoadingAddresses] = useState(false);
   const [selectedAddressId, setSelectedAddressId] = useState('');
-  const [deliverySpeed, setDeliverySpeed] = useState<DeliverySpeedId>('express');
-  const [deliverySlot, setDeliverySlot] = useState('Today, 2–4 PM');
   const [instructions, setInstructions] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodId>('gpay');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodId>('cod');
 
   const refreshAddresses = useCallback(async () => {
     setIsLoadingAddresses(true);
@@ -155,10 +149,6 @@ export function CheckoutProvider({ children }: { children: React.ReactNode }) {
       removeAddress,
       setDefaultAddress,
       refreshAddresses,
-      deliverySpeed,
-      setDeliverySpeed,
-      deliverySlot,
-      setDeliverySlot,
       instructions,
       setInstructions,
       paymentMethod,
@@ -173,8 +163,6 @@ export function CheckoutProvider({ children }: { children: React.ReactNode }) {
       removeAddress,
       setDefaultAddress,
       refreshAddresses,
-      deliverySpeed,
-      deliverySlot,
       instructions,
       paymentMethod,
     ],

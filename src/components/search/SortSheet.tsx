@@ -4,7 +4,6 @@ import {
   CheckmarkWhiteIcon,
   CloseXIcon,
   DiscountTagIcon,
-  PopularityIcon,
   PriceArrowIcon,
   RelevanceIcon,
 } from '../../assets/icons/searchscreen';
@@ -27,7 +26,6 @@ const ICONS: Record<SortOption, React.ReactNode> = {
   ),
   priceHighLow: <PriceArrowIcon width={20} height={21.6} />,
   discount: <DiscountTagIcon width={20} height={19.2} />,
-  popularity: <PopularityIcon width={20} height={19.3} />,
 };
 
 export function SortSheet({ visible, value, onSelect, onClose }: SortSheetProps) {

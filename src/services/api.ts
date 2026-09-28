@@ -1,20 +1,6 @@
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-/**
- * Base URL for the Verdant backend API.
- *
- * - iOS Simulator: `http://localhost:4000` works as-is — the simulator shares the host
- *   machine's network.
- * - Android Emulator: `localhost` on the emulator refers to the emulator itself, not the
- *   dev machine — use `http://10.0.2.2:4000` instead (the emulator's alias for the host).
- * - Physical device (either platform): use your development machine's LAN IP, e.g.
- *   `http://192.168.1.23:4000` (the device and machine must be on the same network).
- *
- * Swap the value below for your environment.
- */
-export const API_ORIGIN = 'http://localhost:4000';
-export const API_BASE_URL = `${API_ORIGIN}/api`;
+import { API_BASE_URL, API_TIMEOUT_MS } from '../config';
 
 export const ACCESS_TOKEN_KEY = 'verdant_access_token';
 export const REFRESH_TOKEN_KEY = 'verdant_refresh_token';
@@ -24,9 +10,9 @@ export async function clearStoredTokens(): Promise<void> {
 }
 
 /**
- * Called when the refresh flow determines the session is no longer valid (refresh token
- * missing/expired/rejected). AuthContext registers a listener here on mount so it can clear
- * its in-memory user state without this module needing to import React/context directly.
+ * Called when the session is no longer valid (refresh token rejected, or the account was
+ * restricted). AuthContext registers a listener here on mount so it can clear its in-memory
+ * user state without this module needing to import React/context directly.
  */
 type ForceLogoutListener = () => void;
 let forceLogoutListener: ForceLogoutListener | null = null;
@@ -34,7 +20,7 @@ export function onForceLogout(listener: ForceLogoutListener): void {
   forceLogoutListener = listener;
 }
 
-export const api = axios.create({ baseURL: API_BASE_URL });
+export const api = axios.create({ baseURL: API_BASE_URL, timeout: API_TIMEOUT_MS });
 
 // Attach the stored access token (if any) to every outgoing request.
 api.interceptors.request.use(async (config) => {
@@ -55,6 +41,12 @@ api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const originalRequest = error.config as RetryableConfig | undefined;
+
+    if (isAccountRestricted(error)) {
+      await clearStoredTokens();
+      forceLogoutListener?.();
+      return Promise.reject(error);
+    }
 
     if (error.response?.status !== 401 || !originalRequest || originalRequest._retry) {
       return Promise.reject(error);
@@ -127,11 +119,37 @@ api.interceptors.response.use(
   },
 );
 
+interface ApiErrorBody {
+  error?: string;
+  reason?: string;
+  details?: unknown;
+}
+
+/** A 403 with `reason: 'account_restricted'` means the account was blocked server-side. */
+export function isAccountRestricted(err: unknown): boolean {
+  if (!axios.isAxiosError(err) || err.response?.status !== 403) return false;
+  return (err.response.data as ApiErrorBody | undefined)?.reason === 'account_restricted';
+}
+
+export function getErrorStatus(err: unknown): number | undefined {
+  return axios.isAxiosError(err) ? err.response?.status : undefined;
+}
+
+/** True for failures where the request never got a server verdict (offline, timeout) or the server itself broke. */
+export function isNetworkOrServerError(err: unknown): boolean {
+  if (!axios.isAxiosError(err)) return false;
+  const status = err.response?.status;
+  return status === undefined || status >= 500;
+}
+
 /** Extracts a human-readable message from an API error, falling back to a generic message. */
 export function getErrorMessage(err: unknown, fallback = 'Something went wrong. Please try again.'): string {
   if (axios.isAxiosError(err)) {
-    const data = err.response?.data as { error?: string } | undefined;
+    const data = err.response?.data as ApiErrorBody | undefined;
     if (data?.error) return data.error;
+    if (err.response?.status === 429) return 'Too many requests — please wait a few minutes and try again.';
+    if (err.code === 'ECONNABORTED') return 'The request timed out. Check your connection and try again.';
+    if (!err.response) return 'Could not reach the server. Check your connection and try again.';
     if (err.message) return err.message;
   }
   if (err instanceof Error && err.message) return err.message;

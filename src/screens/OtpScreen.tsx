@@ -6,7 +6,7 @@ import { AlertX, CheckSmall, InfoDot, InfoIcon, MailIcon } from '../assets/icons
 import { colors, fontFamily, radius, spacing, typography } from '../theme';
 import type { AuthStackParamList } from '../navigation/types';
 import { useAuth } from '../context/AuthContext';
-import { getErrorMessage } from '../services/api';
+import { getErrorMessage, getErrorStatus } from '../services/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Otp'>;
 
@@ -81,7 +81,11 @@ export function OtpScreen({ navigation, route }: Props) {
       setErrorMessage(null);
       setSecondsLeft(RESEND_SECONDS);
     } catch (err) {
-      Alert.alert('Could not resend OTP', getErrorMessage(err));
+      const message =
+        getErrorStatus(err) === 429
+          ? "You've requested too many OTPs. Please wait a few minutes before trying again."
+          : getErrorMessage(err);
+      Alert.alert('Could not resend OTP', message);
     } finally {
       setIsResending(false);
     }
@@ -191,7 +195,7 @@ export function OtpScreen({ navigation, route }: Props) {
         <View style={styles.infoBanner}>
           <InfoIcon width={20} height={20} />
           <Text style={styles.infoText}>
-            The OTP is valid for 10 minutes. Do not share it with anyone. Verdant never asks for your OTP.
+            The OTP is valid for 5 minutes. Do not share it with anyone. Verdant never asks for your OTP.
           </Text>
         </View>
 

@@ -1,44 +1,16 @@
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, ImageSourcePropType, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Image, ImageSourcePropType, Pressable, RefreshControl, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { BackIcon, EmptyBoxIcon, ReorderBtnIcon, TrackBtnIcon } from '../assets/icons/order';
-import { api } from '../services/api';
+import { BottomNavBar } from '../components/home/BottomNavBar';
+import { LoadErrorView } from '../components/order/LoadErrorView';
+import { api, getErrorMessage } from '../services/api';
 import { resolveProductImage } from '../utils/productImage';
 import type { AuthStackParamList } from '../navigation/types';
+import { ORDER_STATUS_LABELS, ORDER_STATUS_TEXT, formatOrderDate, unwrapList, type OrderStatus, type RawOrder } from '../types/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'OrderHistory'>;
-
-type BackendStatus =
-  | 'placed'
-  | 'accepted'
-  | 'preparing'
-  | 'ready_for_pickup'
-  | 'out_for_delivery'
-  | 'delivered'
-  | 'cancelled'
-  | 'rejected';
-
-interface RawOrderItem {
-  productId: string;
-  variantId: string;
-  name: string;
-  variantLabel: string;
-  imageUrl?: string;
-  price: number;
-  mrp: number;
-  quantity: number;
-  subtotal: number;
-}
-
-interface RawOrder {
-  id: string;
-  orderNumber: string;
-  items: RawOrderItem[];
-  pricing: { itemsTotal: number; taxTotal: number; deliveryFee: number; platformFee: number; discount: number; grandTotal: number };
-  status: BackendStatus;
-  placedAt: string;
-}
 
 interface HistoryOrder {
   id: string;
@@ -46,35 +18,20 @@ interface HistoryOrder {
   date: string;
   status: 'active' | 'delivered' | 'cancelled';
   statusLabel: string;
-  eta?: string;
-  etaBy?: string;
+  statusText: string;
   summary: string;
   itemCount: number;
   total: number;
   thumbs?: ImageSourcePropType[];
 }
 
-const STATUS_LABELS: Record<BackendStatus, string> = {
-  placed: 'Order placed',
-  accepted: 'Accepted',
-  preparing: 'Preparing',
-  ready_for_pickup: 'Ready for pickup',
-  out_for_delivery: 'Out for delivery',
-  delivered: 'Delivered',
-  cancelled: 'Cancelled',
-  rejected: 'Rejected',
-};
-
-function groupStatus(status: BackendStatus): 'active' | 'delivered' | 'cancelled' {
+function groupStatus(status: OrderStatus): 'active' | 'delivered' | 'cancelled' {
   if (status === 'delivered') return 'delivered';
   if (status === 'cancelled' || status === 'rejected') return 'cancelled';
   return 'active';
 }
 
 function mapOrder(order: RawOrder): HistoryOrder {
-  const placed = new Date(order.placedAt);
-  const etaDate = new Date(placed.getTime() + 20 * 60 * 1000);
-  const etaMinutes = Math.max(0, Math.round((etaDate.getTime() - Date.now()) / 60000));
   const summary =
     order.items.length > 1
       ? `${order.items[0]?.name ?? 'Item'} + ${order.items.length - 1} more`
@@ -83,11 +40,10 @@ function mapOrder(order: RawOrder): HistoryOrder {
   return {
     id: order.id,
     orderNumber: order.orderNumber,
-    date: placed.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }),
+    date: formatOrderDate(order.placedAt),
     status: groupStatus(order.status),
-    statusLabel: STATUS_LABELS[order.status],
-    eta: `${etaMinutes} min`,
-    etaBy: etaDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+    statusLabel: ORDER_STATUS_LABELS[order.status],
+    statusText: ORDER_STATUS_TEXT[order.status],
     summary,
     itemCount: order.items.length,
     total: order.pricing.grandTotal,
@@ -97,14 +53,30 @@ function mapOrder(order: RawOrder): HistoryOrder {
 
 export function OrderHistoryScreen({ navigation }: Props) {
   const [orders, setOrders] = useState<HistoryOrder[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    api.get<RawOrder[]>('/customer/orders').then(({ data }) => {
-      setOrders(data.map(mapOrder));
-    });
+  const load = useCallback(async () => {
+    const { data } = await api.get<RawOrder[]>('/customer/orders');
+    setOrders(unwrapList(data).map(mapOrder));
+    setError(null);
   }, []);
 
+  useEffect(() => {
+    load().catch((err) => setError(getErrorMessage(err)));
+  }, [load]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    load()
+      .catch((err) => setError(getErrorMessage(err)))
+      .finally(() => setRefreshing(false));
+  }, [load]);
+
   if (!orders) {
+    if (error) {
+      return <LoadErrorView message={error} onRetry={onRefresh} onBack={navigation.canGoBack() ? () => navigation.goBack() : undefined} />;
+    }
     return (
       <View style={styles.loadingWrap}>
         <ActivityIndicator color="#1CA672" size="large" />
@@ -121,9 +93,11 @@ export function OrderHistoryScreen({ navigation }: Props) {
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
       <SafeAreaView edges={['top']} style={styles.headerSafe}>
         <View style={styles.headerRow}>
-          <Pressable style={styles.backButton} onPress={() => navigation.goBack()} hitSlop={8}>
-            <BackIcon width={17} height={17} />
-          </Pressable>
+          {navigation.canGoBack() ? (
+            <Pressable style={styles.backButton} onPress={() => navigation.goBack()} hitSlop={8}>
+              <BackIcon width={17} height={17} />
+            </Pressable>
+          ) : null}
           <View style={styles.headerTitleWrap}>
             <Text style={styles.headerTitle}>My Orders</Text>
             {!isEmpty ? <Text style={styles.headerSubtitle}>{orders.length} orders total</Text> : null}
@@ -138,7 +112,7 @@ export function OrderHistoryScreen({ navigation }: Props) {
           </View>
           <Text style={styles.emptyTitle}>No orders yet</Text>
           <Text style={styles.emptySubtitle}>
-            Your order history will appear here. Start shopping to enjoy fast delivery in minutes!
+            Your order history will appear here once you place your first order.
           </Text>
           <Pressable
             style={styles.startShoppingButton}
@@ -148,17 +122,21 @@ export function OrderHistoryScreen({ navigation }: Props) {
           </Pressable>
           <Pressable
             style={styles.browseLinkWrap}
-            onPress={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })}
+            onPress={() => navigation.reset({ index: 0, routes: [{ name: 'Category' }] })}
           >
             <Text style={styles.browseLink}>Browse categories</Text>
           </Pressable>
         </View>
       ) : (
-        <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.flex}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#1CA672" />}
+        >
           <View style={styles.body}>
             {activeOrders.length > 0 ? (
               <View>
-                <Text style={styles.sectionLabel}>ACTIVE ORDER</Text>
+                <Text style={styles.sectionLabel}>{activeOrders.length === 1 ? 'ACTIVE ORDER' : 'ACTIVE ORDERS'}</Text>
                 <View style={styles.sectionSpacer}>
                   {activeOrders.map((order) => (
                     <ActiveOrderCard key={order.id} order={order} navigation={navigation} />
@@ -180,6 +158,7 @@ export function OrderHistoryScreen({ navigation }: Props) {
           </View>
         </ScrollView>
       )}
+      <BottomNavBar active="orders" />
     </View>
   );
 }
@@ -193,10 +172,10 @@ function ActiveOrderCard({ order, navigation }: { order: HistoryOrder; navigatio
             <View style={styles.activeStatusDot} />
             <Text style={styles.activeStatusText}>{order.statusLabel}</Text>
           </View>
-          <Text style={styles.activeEtaText}>{order.eta}</Text>
+          <Text style={styles.activeEtaText}>{order.date}</Text>
         </View>
         <Text style={styles.activeSubtitle}>
-          Arriving by {order.etaBy} · {order.orderNumber}
+          {order.statusText} · {order.orderNumber}
         </Text>
       </View>
       <View style={styles.activeThumbsRow}>
@@ -206,7 +185,7 @@ function ActiveOrderCard({ order, navigation }: { order: HistoryOrder; navigatio
           ))}
         </View>
         <Text style={styles.activeItemsText}>
-          {order.itemCount} items · <Text style={styles.activeItemsBold}>₹{order.total}</Text>
+          {order.itemCount} {order.itemCount === 1 ? 'item' : 'items'} · <Text style={styles.activeItemsBold}>₹{order.total}</Text>
         </Text>
       </View>
       <View style={styles.activeActionsRow}>
@@ -246,7 +225,7 @@ function PastOrderCard({ order, navigation }: { order: HistoryOrder; navigation:
       <View style={styles.pastCardBody}>
         <Text style={styles.pastSummary}>{order.summary}</Text>
         <Text style={styles.pastItemsText}>
-          {order.itemCount} items · <Text style={styles.pastItemsBold}>₹{order.total}</Text>
+          {order.itemCount} {order.itemCount === 1 ? 'item' : 'items'} · <Text style={styles.pastItemsBold}>₹{order.total}</Text>
         </Text>
       </View>
       <View style={styles.pastActionsRow}>

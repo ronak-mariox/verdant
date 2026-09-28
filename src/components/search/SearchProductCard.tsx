@@ -26,10 +26,15 @@ export function SearchProductCard({ product, onPress, onAddPress }: SearchProduc
           {product.title}
         </Text>
         <Text style={styles.weight}>{product.weight}</Text>
-        <View style={styles.etaRow}>
-          <View style={styles.etaDot} />
-          <Text style={styles.etaText}>{product.deliveryMins} mins</Text>
-        </View>
+        {product.offerLabel ? (
+          <View style={styles.etaRow}>
+            <View style={styles.etaDot} />
+            <Text style={styles.etaText} numberOfLines={1}>
+              {product.offerLabel}
+            </Text>
+          </View>
+        ) : null}
+        {!product.inStock ? <Text style={styles.outOfStock}>Out of stock</Text> : null}
         <View style={styles.priceRow}>
           <Text style={styles.price}>₹{product.price}</Text>
           <Text style={styles.mrp}>₹{product.originalPrice}</Text>
@@ -113,6 +118,11 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 15,
     color: colors.brand.primary,
+  },
+  outOfStock: {
+    ...typography.caption,
+    color: colors.status.errorText,
+    marginTop: 4,
   },
   priceRow: {
     flexDirection: 'row',

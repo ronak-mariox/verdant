@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   FlatList,
@@ -15,18 +16,18 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { ChevronRightSmall, ClockIcon } from '../assets/icons';
-import { MicIcon, SearchIconHome } from '../assets/icons/homescreen';
+import { SearchIconHome } from '../assets/icons/homescreen';
 import { BackWhiteIcon, CartIcon } from '../assets/icons/store';
 import { CloseXIcon, FilterIcon, GridViewIcon, ListViewIcon, SortArrowsIcon } from '../assets/icons/searchscreen';
-import { BottomNavBar, type NavTab } from '../components/home/BottomNavBar';
+import { BottomNavBar } from '../components/home/BottomNavBar';
 import { FilterSheet } from '../components/search/FilterSheet';
 import { SearchProductCard } from '../components/search/SearchProductCard';
 import { SortSheet } from '../components/search/SortSheet';
 import { useCart } from '../context/CartContext';
 import {
   DEFAULT_FILTERS,
-  INITIAL_RECENT_SEARCHES,
-  POPULAR_SEARCHES,
+  MAX_RECENT_SEARCHES,
+  RECENT_SEARCHES_STORAGE_KEY,
   SORT_OPTIONS,
   applyResultFilters,
   sortResults,
@@ -36,45 +37,10 @@ import {
 } from '../data/search';
 import type { AuthStackParamList } from '../navigation/types';
 import { api } from '../services/api';
-import { resolveProductImage } from '../utils/productImage';
+import { alertCartError } from '../utils/cartAlerts';
+import { toSearchProduct } from '../utils/productMappers';
+import type { RawProduct } from '../types/api';
 import { colors, radius, spacing, typography } from '../theme';
-
-interface RawVariant {
-  id: string;
-  label: string;
-  mrp: number;
-  price: number;
-  stock: number;
-}
-
-interface RawProduct {
-  id: string;
-  name: string;
-  brand?: string;
-  unit?: string;
-  images: string[];
-  variants: RawVariant[];
-}
-
-function toSearchProduct(product: RawProduct): SearchProduct {
-  const variant = product.variants[0];
-  const discountPercent =
-    variant && variant.mrp > 0 ? Math.round(((variant.mrp - variant.price) / variant.mrp) * 100) : 0;
-  return {
-    id: product.id,
-    image: resolveProductImage(product.images[0]),
-    title: product.name,
-    weight: product.unit ?? variant?.label ?? '',
-    category: '',
-    brand: product.brand ?? '',
-    price: variant?.price ?? 0,
-    originalPrice: variant?.mrp ?? 0,
-    discountPercent,
-    deliveryMins: 10,
-    popularity: 0,
-    inStock: (variant?.stock ?? 0) > 0,
-  };
-}
 
 const DEBOUNCE_MS = 300;
 
@@ -129,7 +95,7 @@ export function SearchScreen({ navigation }: Props) {
 
   const [query, setQuery] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
-  const [recentSearches, setRecentSearches] = useState<string[]>(INITIAL_RECENT_SEARCHES);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [sortBy, setSortBy] = useState<SortOption>('relevance');
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
@@ -139,6 +105,23 @@ export function SearchScreen({ navigation }: Props) {
   const [suggestionProducts, setSuggestionProducts] = useState<RawProduct[]>([]);
   const [rawResults, setRawResults] = useState<RawProduct[]>([]);
   const [resultsLoading, setResultsLoading] = useState(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem(RECENT_SEARCHES_STORAGE_KEY)
+      .then((stored) => {
+        const parsed: unknown = stored ? JSON.parse(stored) : [];
+        if (Array.isArray(parsed)) setRecentSearches(parsed.filter((t): t is string => typeof t === 'string'));
+      })
+      .catch(() => {});
+  }, []);
+
+  const updateRecentSearches = (update: (prev: string[]) => string[]) => {
+    setRecentSearches((prev) => {
+      const next = update(prev);
+      AsyncStorage.setItem(RECENT_SEARCHES_STORAGE_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  };
 
   const showResults = submittedQuery !== null && query === submittedQuery;
   const showSuggestions = query.length > 0 && !showResults;
@@ -176,10 +159,10 @@ export function SearchScreen({ navigation }: Props) {
 
   const baseResults = useMemo(() => rawResults.map(toSearchProduct), [rawResults]);
 
-  const categoryChips = useMemo(() => {
-    const categories = Array.from(new Set(baseResults.map((item) => item.category))).filter(Boolean);
-    return ['All', ...categories];
-  }, [baseResults]);
+  const brands = useMemo(
+    () => Array.from(new Set(baseResults.map((item) => item.brand).filter(Boolean))).sort(),
+    [baseResults],
+  );
 
   const filteredResults = useMemo(() => applyResultFilters(baseResults, filters), [baseResults, filters]);
 
@@ -193,7 +176,9 @@ export function SearchScreen({ navigation }: Props) {
     setQuery(trimmed);
     setSubmittedQuery(trimmed);
     setFilters(DEFAULT_FILTERS);
-    setRecentSearches((prev) => [trimmed, ...prev.filter((t) => t.toLowerCase() !== trimmed.toLowerCase())].slice(0, 8));
+    updateRecentSearches((prev) =>
+      [trimmed, ...prev.filter((t) => t.toLowerCase() !== trimmed.toLowerCase())].slice(0, MAX_RECENT_SEARCHES),
+    );
     Keyboard.dismiss();
   };
 
@@ -204,22 +189,15 @@ export function SearchScreen({ navigation }: Props) {
   };
 
   const handleRemoveRecent = (term: string) => {
-    setRecentSearches((prev) => prev.filter((t) => t !== term));
+    updateRecentSearches((prev) => prev.filter((t) => t !== term));
   };
 
   const handleAddToCart = (product: SearchProduct) => {
-    const variantId = rawResults.find((p) => p.id === product.id)?.variants[0]?.id;
-    if (variantId) addItem(product.id, variantId);
+    if (product.variantId) addItem(product.id, product.variantId).catch(alertCartError);
   };
 
   const openProduct = (product: SearchProduct) => navigation.navigate('ProductDetail', { productId: product.id });
 
-  const handleTabChange = (tab: NavTab) => {
-    if (tab === 'home') navigation.navigate('Home');
-    else if (tab === 'categories') navigation.navigate('Category');
-    else if (tab === 'orders') navigation.navigate('OrderHistory');
-    else if (tab === 'profile') navigation.navigate('Profile');
-  };
 
   const activeSortLabel = SORT_OPTIONS.find((option) => option.id === sortBy)?.title ?? 'Relevance';
 
@@ -228,7 +206,11 @@ export function SearchScreen({ navigation }: Props) {
       <StatusBar barStyle="light-content" backgroundColor={colors.brand.primary} />
       <SafeAreaView edges={['top']} style={styles.headerSafe}>
         <View style={styles.searchBarRow}>
-          <Pressable style={styles.backButton} onPress={() => navigation.goBack()} hitSlop={8}>
+          <Pressable
+            style={styles.backButton}
+            onPress={() => (navigation.canGoBack() ? navigation.goBack() : navigation.reset({ index: 0, routes: [{ name: 'Home' }] }))}
+            hitSlop={8}
+          >
             <BackWhiteIcon width={20} height={20} />
           </Pressable>
           <View style={styles.searchInputWrap}>
@@ -248,11 +230,7 @@ export function SearchScreen({ navigation }: Props) {
               <Pressable style={styles.clearButton} onPress={handleClearInput} hitSlop={8}>
                 <CloseXIcon width={10} height={10} />
               </Pressable>
-            ) : (
-              <Pressable hitSlop={8}>
-                <MicIcon width={18} height={18} />
-              </Pressable>
-            )}
+            ) : null}
           </View>
         </View>
       </SafeAreaView>
@@ -264,7 +242,7 @@ export function SearchScreen({ navigation }: Props) {
               <View>
                 <View style={styles.sectionHeaderRow}>
                   <Text style={styles.sectionTitle}>Recent searches</Text>
-                  <Pressable onPress={() => setRecentSearches([])} hitSlop={8}>
+                  <Pressable onPress={() => updateRecentSearches(() => [])} hitSlop={8}>
                     <Text style={styles.clearAllText}>Clear all</Text>
                   </Pressable>
                 </View>
@@ -286,20 +264,6 @@ export function SearchScreen({ navigation }: Props) {
               </View>
             ) : null}
 
-            <View style={styles.popularSection}>
-              <Text style={styles.sectionTitle}>Popular right now</Text>
-              <View style={styles.popularChipWrap}>
-                {POPULAR_SEARCHES.map(({ term, highlighted }) => (
-                  <Pressable
-                    key={term}
-                    style={[styles.popularChip, highlighted && styles.popularChipHighlighted]}
-                    onPress={() => handleSearch(term)}
-                  >
-                    <Text style={styles.popularChipText}>{term}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
           </ScrollView>
         ) : null}
 
@@ -371,23 +335,6 @@ export function SearchScreen({ navigation }: Props) {
                     {activeSortLabel}
                   </Text>
                 </Pressable>
-                {categoryChips.length > 1 ? (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                    <View style={styles.categoryChipsRow}>
-                      {categoryChips.map((category) => (
-                        <Pressable
-                          key={category}
-                          style={[styles.categoryChip, filters.category === category && styles.categoryChipActive]}
-                          onPress={() => setFilters((prev) => ({ ...prev, category }))}
-                        >
-                          <Text style={[styles.categoryChipText, filters.category === category && styles.categoryChipTextActive]}>
-                            {category}
-                          </Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  </ScrollView>
-                ) : null}
               </View>
             </View>
 
@@ -447,12 +394,13 @@ export function SearchScreen({ navigation }: Props) {
         </Pressable>
       ) : null}
 
-      <BottomNavBar active="search" onChange={handleTabChange} />
+      <BottomNavBar active="search" />
 
       <SortSheet visible={sortSheetVisible} value={sortBy} onSelect={setSortBy} onClose={() => setSortSheetVisible(false)} />
       <FilterSheet
         visible={filterSheetVisible}
         filters={filters}
+        brands={brands}
         onApply={setFilters}
         onClose={() => setFilterSheetVisible(false)}
       />

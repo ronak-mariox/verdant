@@ -1,32 +1,56 @@
-import React, { useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Image, Linking, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { BackIcon, CameraIcon } from '../assets/icons/order';
-import { activeOrder, issueTypes } from '../data/orders';
+import { BackIcon } from '../assets/icons/order';
+import { LoadErrorView } from '../components/order/LoadErrorView';
+import { SUPPORT_EMAIL, issueTypes } from '../data/orders';
 import type { AuthStackParamList } from '../navigation/types';
+import { api, getErrorMessage } from '../services/api';
+import type { RawOrder } from '../types/api';
+import { resolveProductImage } from '../utils/productImage';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'IssueDetails'>;
 
-const RESOLUTIONS = [
-  { id: 'refund', title: 'Refund to original payment method', subtitle: '₹148 back to Google Pay within 5–7 days' },
-  { id: 'resend', title: 'Send the missing item', subtitle: 'Delivered at earliest availability' },
-  { id: 'wallet', title: 'Blinkit wallet credit', subtitle: '₹148 credit — instant, use on next order' },
-];
-
 export function IssueDetailsScreen({ navigation, route }: Props) {
-  const issueType = issueTypes.find((i) => i.id === route.params?.issueType) ?? issueTypes[0];
-  const [selectedItemId, setSelectedItemId] = useState(activeOrder.items[0]?.id ?? null);
+  const { orderId, orderNumber } = route.params;
+  const issueType = issueTypes.find((i) => i.id === route.params.issueType) ?? issueTypes[issueTypes.length - 1];
+  const [order, setOrder] = useState<RawOrder | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [description, setDescription] = useState('');
-  const [resolution, setResolution] = useState('refund');
-  const [photoAdded, setPhotoAdded] = useState(false);
 
-  const handleAddPhoto = () => {
-    Alert.alert('Add photo', 'Choose a source', [
-      { text: 'Camera', onPress: () => setPhotoAdded(true) },
-      { text: 'Photo Library', onPress: () => setPhotoAdded(true) },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+  const loadOrder = useCallback(() => {
+    setLoadError(null);
+    api
+      .get<RawOrder>(`/customer/orders/${orderId}`)
+      .then(({ data }) => setOrder(data))
+      .catch((err) => setLoadError(getErrorMessage(err, 'Could not load this order.')));
+  }, [orderId]);
+
+  useEffect(() => {
+    loadOrder();
+  }, [loadOrder]);
+
+  const handleSubmit = async () => {
+    const item = order?.items.find((i) => i.variantId === selectedItemId);
+    const subject = `Issue with order ${orderNumber}: ${issueType.title}`;
+    const body = [
+      `Order: ${orderNumber}`,
+      `Issue: ${issueType.title}`,
+      item ? `Item: ${item.name} (${item.variantLabel})` : null,
+      '',
+      description.trim(),
+    ]
+      .filter((line) => line !== null)
+      .join('\n');
+    const url = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    try {
+      await Linking.openURL(url);
+      navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+    } catch {
+      Alert.alert('No email app found', `Please email ${SUPPORT_EMAIL} and mention order ${orderNumber}.`);
+    }
   };
 
   return (
@@ -40,7 +64,7 @@ export function IssueDetailsScreen({ navigation, route }: Props) {
           <View style={styles.headerTitleWrap}>
             <Text style={styles.headerTitle}>Issue Details</Text>
             <Text style={styles.headerSubtitle}>
-              {issueType.title} · {activeOrder.id}
+              {issueType.title} · {orderNumber}
             </Text>
           </View>
         </View>
@@ -49,38 +73,43 @@ export function IssueDetailsScreen({ navigation, route }: Props) {
       <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
         <View style={styles.body}>
           <View style={styles.tagRow}>
-            <Text style={styles.tagEmoji}>📦</Text>
             <View style={styles.tag}>
               <Text style={styles.tagText}>{issueType.title}</Text>
             </View>
-            <Text style={styles.tagFrom}>from order {activeOrder.id}</Text>
+            <Text style={styles.tagFrom}>from order {orderNumber}</Text>
           </View>
 
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Which item was affected?</Text>
-            {activeOrder.items.map((item, index) => {
-              const active = item.id === selectedItemId;
-              return (
-                <Pressable
-                  key={item.id}
-                  style={[styles.itemRow, index === activeOrder.items.length - 1 && styles.itemRowLast]}
-                  onPress={() => setSelectedItemId(item.id)}
-                >
-                  <View style={styles.itemImageWrap}>
-                    <Image source={item.image} style={styles.itemImage} resizeMode="contain" />
-                  </View>
-                  <View style={styles.itemInfo}>
-                    <Text style={styles.itemName}>{item.name}</Text>
-                    <Text style={styles.itemSubtitle}>
-                      {item.subtitle.split(' × ')[0]} · ₹{item.price}
-                    </Text>
-                  </View>
-                  <View style={[styles.checkbox, active && styles.checkboxActive]}>
-                    {active ? <View style={styles.checkboxDot} /> : null}
-                  </View>
-                </Pressable>
-              );
-            })}
+            {loadError ? (
+              <LoadErrorView message={loadError} onRetry={loadOrder} />
+            ) : !order ? (
+              <ActivityIndicator color="#1CA672" />
+            ) : (
+              order.items.map((item, index) => {
+                const active = item.variantId === selectedItemId;
+                return (
+                  <Pressable
+                    key={`${item.productId}-${item.variantId}`}
+                    style={[styles.itemRow, index === order.items.length - 1 && styles.itemRowLast]}
+                    onPress={() => setSelectedItemId(active ? null : item.variantId)}
+                  >
+                    <View style={styles.itemImageWrap}>
+                      <Image source={resolveProductImage(item.imageUrl)} style={styles.itemImage} resizeMode="contain" />
+                    </View>
+                    <View style={styles.itemInfo}>
+                      <Text style={styles.itemName}>{item.name}</Text>
+                      <Text style={styles.itemSubtitle}>
+                        {item.variantLabel} · ₹{item.price}
+                      </Text>
+                    </View>
+                    <View style={[styles.checkbox, active && styles.checkboxActive]}>
+                      {active ? <View style={styles.checkboxDot} /> : null}
+                    </View>
+                  </Pressable>
+                );
+              })
+            )}
           </View>
 
           <View style={styles.card}>
@@ -88,7 +117,7 @@ export function IssueDetailsScreen({ navigation, route }: Props) {
             <TextInput
               style={styles.textArea}
               multiline
-              placeholder="Tell us what happened — e.g. 'Fortune Sunflower Oil was not in the bag when I received my order.'"
+              placeholder="Tell us what happened"
               placeholderTextColor="rgba(26,26,26,0.5)"
               value={description}
               onChangeText={setDescription}
@@ -97,49 +126,16 @@ export function IssueDetailsScreen({ navigation, route }: Props) {
             <Text style={styles.charCount}>{description.length}/500</Text>
           </View>
 
-          <View style={styles.card}>
-            <View style={styles.photoHeaderRow}>
-              <Text style={styles.cardTitle}>
-                Add photo <Text style={styles.optionalText}>(optional)</Text>
-              </Text>
-            </View>
-            <Pressable style={styles.photoUpload} onPress={handleAddPhoto}>
-              <View style={styles.photoIconWrap}>
-                <CameraIcon width={20} height={20} />
-              </View>
-              <Text style={styles.photoTitle}>{photoAdded ? '1 photo added ✓' : 'Tap to add photo'}</Text>
-              <Text style={styles.photoSubtitle}>{photoAdded ? 'Tap to change photo' : 'JPG, PNG up to 10 MB'}</Text>
-            </Pressable>
-          </View>
-
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Preferred resolution</Text>
-            {RESOLUTIONS.map((option, index) => {
-              const active = option.id === resolution;
-              return (
-                <Pressable
-                  key={option.id}
-                  style={[styles.resolutionRow, index === RESOLUTIONS.length - 1 && styles.itemRowLast]}
-                  onPress={() => setResolution(option.id)}
-                >
-                  <View style={[styles.radio, active && styles.radioActive]}>
-                    {active ? <View style={styles.radioDot} /> : null}
-                  </View>
-                  <View style={styles.itemInfo}>
-                    <Text style={styles.itemName}>{option.title}</Text>
-                    <Text style={styles.itemSubtitle}>{option.subtitle}</Text>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
+          <Text style={styles.itemSubtitle}>
+            Submitting opens your email app with these details addressed to {SUPPORT_EMAIL}.
+          </Text>
         </View>
       </ScrollView>
 
       <SafeAreaView edges={['bottom']} style={styles.footerSafe}>
         <View style={styles.footer}>
-          <Pressable style={styles.submitButton} onPress={() => navigation.navigate('IssueSubmitted')}>
-            <Text style={styles.submitButtonText}>Submit Issue</Text>
+          <Pressable style={styles.submitButton} onPress={handleSubmit}>
+            <Text style={styles.submitButtonText}>Email support</Text>
           </Pressable>
         </View>
       </SafeAreaView>

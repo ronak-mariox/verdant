@@ -1,24 +1,48 @@
-import React, { useState } from 'react';
-import { Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { BackIcon } from '../assets/icons/order';
-import { besan, fortuneThumb, reorderMilk } from '../assets/images/order';
-import { historyOrders, issueTypes } from '../data/orders';
+import { LoadErrorView } from '../components/order/LoadErrorView';
+import { issueTypes } from '../data/orders';
 import type { AuthStackParamList } from '../navigation/types';
+import { api, getErrorMessage } from '../services/api';
+import { formatOrderDate, unwrapList, type PagedResponse, type RawOrder } from '../types/api';
+import { resolveProductImage } from '../utils/productImage';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'ReportIssue'>;
 
-const ORDER_THUMBS: Record<string, number> = {
-  '#BLK240904-7831': fortuneThumb,
-  '#BLK240831-2451': besan,
-  '#BLK240828-9123': reorderMilk,
-};
+const MAX_ORDERS = 10;
 
 export function ReportIssueScreen({ navigation }: Props) {
-  const selectableOrders = historyOrders.slice(0, 3);
-  const [selectedOrder, setSelectedOrder] = useState(selectableOrders[0].id);
+  const [orders, setOrders] = useState<RawOrder[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<string | null>(null);
+
+  const loadOrders = useCallback(() => {
+    setLoadError(null);
+    api
+      .get<RawOrder[] | PagedResponse<RawOrder>>('/customer/orders')
+      .then(({ data }) => {
+        const list = unwrapList(data).slice(0, MAX_ORDERS);
+        setOrders(list);
+        setSelectedOrder((prev) => prev ?? list[0]?.id ?? null);
+      })
+      .catch((err) => setLoadError(getErrorMessage(err, 'Could not load your orders.')));
+  }, []);
+
+  useEffect(() => {
+    loadOrders();
+  }, [loadOrders]);
+
+  const order = orders?.find((o) => o.id === selectedOrder);
+  const canContinue = Boolean(order && selectedIssue);
+
+  const handleContinue = () => {
+    if (!order || !selectedIssue) return;
+    navigation.navigate('IssueDetails', { issueType: selectedIssue, orderId: order.id, orderNumber: order.orderNumber });
+  };
 
   return (
     <View style={styles.flex}>
@@ -39,31 +63,40 @@ export function ReportIssueScreen({ navigation }: Props) {
         <View style={styles.body}>
           <View>
             <Text style={styles.sectionLabel}>SELECT ORDER</Text>
-            <View style={styles.orderList}>
-              {selectableOrders.map((order) => {
-                const active = order.id === selectedOrder;
-                return (
-                  <Pressable
-                    key={order.id}
-                    style={[styles.orderRow, active && styles.orderRowActive]}
-                    onPress={() => setSelectedOrder(order.id)}
-                  >
-                    <View style={styles.orderThumbWrap}>
-                      <Image source={ORDER_THUMBS[order.id]} style={styles.orderThumb} resizeMode="contain" />
-                    </View>
-                    <View style={styles.orderInfo}>
-                      <Text style={styles.orderId}>{order.id}</Text>
-                      <Text style={styles.orderMeta}>
-                        {order.date} · {order.itemCount} items · ₹{order.total}
-                      </Text>
-                    </View>
-                    <View style={[styles.radio, active && styles.radioActive]}>
-                      {active ? <View style={styles.radioDot} /> : null}
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
+            {loadError ? (
+              <LoadErrorView message={loadError} onRetry={loadOrders} />
+            ) : orders === null ? (
+              <ActivityIndicator color="#1CA672" />
+            ) : orders.length === 0 ? (
+              <Text style={styles.orderMeta}>You haven't placed any orders yet.</Text>
+            ) : (
+              <View style={styles.orderList}>
+                {orders.map((o) => {
+                  const active = o.id === selectedOrder;
+                  const itemCount = o.items.reduce((sum, i) => sum + i.quantity, 0);
+                  return (
+                    <Pressable
+                      key={o.id}
+                      style={[styles.orderRow, active && styles.orderRowActive]}
+                      onPress={() => setSelectedOrder(o.id)}
+                    >
+                      <View style={styles.orderThumbWrap}>
+                        <Image source={resolveProductImage(o.items[0]?.imageUrl)} style={styles.orderThumb} resizeMode="contain" />
+                      </View>
+                      <View style={styles.orderInfo}>
+                        <Text style={styles.orderId}>{o.orderNumber}</Text>
+                        <Text style={styles.orderMeta}>
+                          {formatOrderDate(o.placedAt)} · {itemCount} items · ₹{o.pricing.grandTotal}
+                        </Text>
+                      </View>
+                      <View style={[styles.radio, active && styles.radioActive]}>
+                        {active ? <View style={styles.radioDot} /> : null}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
           </View>
 
           <View>
@@ -89,12 +122,12 @@ export function ReportIssueScreen({ navigation }: Props) {
       <SafeAreaView edges={['bottom']} style={styles.footerSafe}>
         <View style={styles.footer}>
           <Pressable
-            style={[styles.continueButton, !selectedIssue && styles.continueButtonDisabled]}
-            disabled={!selectedIssue}
-            onPress={() => selectedIssue && navigation.navigate('IssueDetails', { issueType: selectedIssue })}
+            style={[styles.continueButton, !canContinue && styles.continueButtonDisabled]}
+            disabled={!canContinue}
+            onPress={handleContinue}
           >
             <Text style={styles.continueButtonText}>
-              {selectedIssue ? 'Continue' : 'Select an issue to continue'}
+              {canContinue ? 'Continue' : 'Select an order and issue to continue'}
             </Text>
           </Pressable>
         </View>

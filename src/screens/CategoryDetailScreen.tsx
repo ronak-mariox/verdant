@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { BackIcon } from '../assets/icons/order';
 import { FilterIcon, SortArrowsIcon } from '../assets/icons/searchscreen';
-import { BottomNavBar, type NavTab } from '../components/home/BottomNavBar';
+import { BottomNavBar } from '../components/home/BottomNavBar';
 import { ProductCard } from '../components/home/ProductCard';
 import { CategoryFilterSheet } from '../components/category/CategoryFilterSheet';
 import { SortSheet } from '../components/search/SortSheet';
@@ -19,60 +19,13 @@ import { SORT_OPTIONS, type SortOption } from '../data/search';
 import type { AuthStackParamList } from '../navigation/types';
 import type { ProductItem } from '../data/home';
 import { api } from '../services/api';
-import { resolveProductImage } from '../utils/productImage';
+import { alertCartError } from '../utils/cartAlerts';
+import { toProductItem } from '../utils/productMappers';
+import { unwrapList, type PagedResponse, type RawCategory, type RawProduct } from '../types/api';
 import { resolveCategoryCoverIcon } from '../utils/categoryIcon';
 import { colors, radius, spacing, typography } from '../theme';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'CategoryDetail'>;
-
-interface RawSubcategory {
-  id: string;
-  name: string;
-  imageUrl?: string;
-  isActive: boolean;
-}
-
-interface RawCategory {
-  id: string;
-  name: string;
-  slug: string;
-  imageUrl?: string;
-  sortOrder: number;
-  isActive: boolean;
-  showOnHome: boolean;
-  subcategories: RawSubcategory[];
-}
-
-interface RawVariant {
-  id: string;
-  label: string;
-  mrp: number;
-  price: number;
-  stock: number;
-}
-
-interface RawProduct {
-  id: string;
-  name: string;
-  unit?: string;
-  images: string[];
-  variants: RawVariant[];
-}
-
-function toProductItem(product: RawProduct): ProductItem {
-  const variant = product.variants[0];
-  const discountPercent =
-    variant && variant.mrp > 0 ? Math.round(((variant.mrp - variant.price) / variant.mrp) * 100) : 0;
-  return {
-    id: product.id,
-    image: resolveProductImage(product.images[0]),
-    title: product.name,
-    weight: product.unit ?? variant?.label ?? '',
-    price: variant?.price ?? 0,
-    originalPrice: variant?.mrp ?? 0,
-    discountPercent,
-  };
-}
 
 const FALLBACK_CATEGORY: RawCategory = {
   id: '',
@@ -89,17 +42,17 @@ export function CategoryDetailScreen({ navigation, route }: Props) {
   const { addItem } = useCart();
 
   const [categories, setCategories] = useState<RawCategory[]>([]);
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   const [rawProducts, setRawProducts] = useState<RawProduct[]>([]);
 
   // Callers pass either a real category id (tapping a tile in CategoryScreen's grid,
   // which already has the fetched category objects) or a stable slug (HomeScreen's
   // featuredPicks/essentialTiles/category-tab links, defined statically in data/home.ts
   // before any category id is known) — match against both.
-  const category =
-    categories.find((c) => c.id === categoryId || c.slug === categoryId) ?? categories[0] ?? FALLBACK_CATEGORY;
+  const matchedCategory = categories.find((c) => c.id === categoryId || c.slug === categoryId);
+  const category = matchedCategory ?? FALLBACK_CATEGORY;
   const otherCategories = categories.filter((c) => c.id !== category.id);
 
-  const [activeTab, setActiveTab] = useState<NavTab>('categories');
   const [activeSubcategory, setActiveSubcategory] = useState<string>(subcategoryId ?? 'all');
   const [sortBy, setSortBy] = useState<SortOption>('relevance');
   const [filters, setFilters] = useState<CategoryFilterState>(DEFAULT_CATEGORY_FILTERS);
@@ -110,7 +63,8 @@ export function CategoryDetailScreen({ navigation, route }: Props) {
     api
       .get<RawCategory[]>('/customer/categories')
       .then(({ data }) => setCategories(data))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setCategoriesLoaded(true));
   }, []);
 
   useEffect(() => {
@@ -119,14 +73,14 @@ export function CategoryDetailScreen({ navigation, route }: Props) {
     // worse, silently return an unrelated category's products.
     if (!category.id) return;
     api
-      .get<{ items: RawProduct[] }>('/customer/products', {
+      .get<RawProduct[] | PagedResponse<RawProduct>>('/customer/products', {
         params: {
           categoryId: category.id,
           subcategoryId: activeSubcategory !== 'all' ? activeSubcategory : undefined,
           limit: 50,
         },
       })
-      .then(({ data }) => setRawProducts(data.items))
+      .then(({ data }) => setRawProducts(unwrapList(data)))
       .catch(() => setRawProducts([]));
   }, [category.id, activeSubcategory]);
 
@@ -137,13 +91,6 @@ export function CategoryDetailScreen({ navigation, route }: Props) {
   const hasProducts = sortedProducts.length > 0;
   const activeSortLabel = SORT_OPTIONS.find((option) => option.id === sortBy)?.title ?? 'Relevance';
 
-  const handleTabChange = (tab: NavTab) => {
-    setActiveTab(tab);
-    if (tab === 'home') navigation.navigate('Home');
-    else if (tab === 'search') navigation.navigate('Search');
-    else if (tab === 'orders') navigation.navigate('OrderHistory');
-    else if (tab === 'profile') navigation.navigate('Profile');
-  };
 
   const handleSelectSubcategory = (id: string) => {
     setActiveSubcategory(id);
@@ -151,13 +98,31 @@ export function CategoryDetailScreen({ navigation, route }: Props) {
   };
 
   const handleAddToCart = (item: ProductItem) => {
-    const variantId = rawProducts.find((p) => p.id === item.id)?.variants[0]?.id;
-    if (variantId) addItem(item.id, variantId);
+    if (item.variantId) addItem(item.id, item.variantId).catch(alertCartError);
   };
 
   const openProduct = (item: ProductItem) => navigation.navigate('ProductDetail', { productId: item.id });
 
   const openOtherCategory = (id: string) => navigation.replace('CategoryDetail', { categoryId: id });
+
+  if (categoriesLoaded && !matchedCategory) {
+    return (
+      <View style={styles.flex}>
+        <SafeAreaView edges={['top']} style={styles.headerSafe}>
+          <View style={styles.headerRow}>
+            <Pressable style={styles.backButton} onPress={() => navigation.goBack()} hitSlop={8}>
+              <BackIcon width={17} height={17} />
+            </Pressable>
+          </View>
+        </SafeAreaView>
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyTitle}>Category not found</Text>
+          <Text style={styles.emptySubtitle}>This category isn't available right now.</Text>
+        </View>
+        <BottomNavBar active="categories" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.flex}>
@@ -268,7 +233,7 @@ export function CategoryDetailScreen({ navigation, route }: Props) {
         </View>
       )}
 
-      <BottomNavBar active={activeTab} onChange={handleTabChange} />
+      <BottomNavBar active="categories" />
 
       <SortSheet visible={sortSheetVisible} value={sortBy} onSelect={setSortBy} onClose={() => setSortSheetVisible(false)} />
       <CategoryFilterSheet

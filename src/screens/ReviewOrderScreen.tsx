@@ -4,10 +4,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CouponCheck, DeliveryPin } from '../assets/icons/checkout';
 import { CheckoutHeader } from '../components/checkout/CheckoutHeader';
+import { BillRow } from '../components/order/BillRow';
 import { useCart } from '../context/CartContext';
 import { useCheckout } from '../context/CheckoutContext';
 import { paymentMethods } from '../data/checkout';
 import type { AuthStackParamList } from '../navigation/types';
+import { summarizeLines } from '../types/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'ReviewOrder'>;
 
@@ -18,17 +20,13 @@ export function ReviewOrderScreen({ navigation }: Props) {
   const address = addressList.find((a) => a.id === selectedAddressId) ?? addressList[0];
   const method = paymentMethods.find((m) => m.id === paymentMethod);
 
-  const itemTotal = useMemo(() => items.reduce((sum, i) => sum + (i.mrp ?? i.price) * i.quantity, 0), [items]);
-  const productDiscount = useMemo(
-    () => items.reduce((sum, i) => sum + ((i.mrp ?? i.price) - i.price) * i.quantity, 0),
-    [items],
-  );
+  const { itemTotal, offerDiscount } = useMemo(() => summarizeLines(items), [items]);
   const deliveryFee = pricing?.deliveryFee ?? 0;
   const platformFee = pricing?.platformFee ?? 0;
   const taxTotal = pricing?.taxTotal ?? 0;
   const couponDiscount = pricing?.discount ?? 0;
   const toPay = pricing?.grandTotal ?? 0;
-  const totalSavings = productDiscount + couponDiscount;
+  const totalSavings = offerDiscount + couponDiscount;
 
   const handlePlaceOrder = () => {
     if (!address) {
@@ -88,7 +86,7 @@ export function ReviewOrderScreen({ navigation }: Props) {
                 </Text>
                 <Text style={styles.itemQty}>Qty: {item.quantity}</Text>
               </View>
-              <Text style={styles.itemPrice}>₹{item.price * item.quantity}</Text>
+              <Text style={styles.itemPrice}>₹{item.subtotal}</Text>
             </View>
           ))}
         </View>
@@ -116,12 +114,14 @@ export function ReviewOrderScreen({ navigation }: Props) {
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Bill Summary</Text>
-          <BillRow label="Item total (MRP)" value={`₹${itemTotal}`} />
-          <BillRow label="Product discount" value={`−₹${productDiscount}`} valueColor="#1CA672" />
-          {couponCode ? <BillRow label="Coupon discount" value={`−₹${couponDiscount}`} valueColor="#1CA672" /> : null}
+          <BillRow label="Item total" value={`₹${itemTotal}`} />
+          {offerDiscount > 0 ? <BillRow label="Offer discount" value={`−₹${offerDiscount}`} valueColor="#1CA672" /> : null}
+          {couponCode && couponDiscount > 0 ? (
+            <BillRow label={`Coupon ${couponCode}`} value={`−₹${couponDiscount}`} valueColor="#1CA672" />
+          ) : null}
           {taxTotal > 0 ? <BillRow label="Taxes" value={`₹${taxTotal}`} labelColor="#9CA3AF" /> : null}
           <BillRow label="Delivery fee" value={deliveryFee > 0 ? `₹${deliveryFee}` : 'FREE'} labelColor="#9CA3AF" />
-          <BillRow label="Platform fee" value={`₹${platformFee}`} labelColor="#9CA3AF" />
+          {platformFee > 0 ? <BillRow label="Platform fee" value={`₹${platformFee}`} labelColor="#9CA3AF" /> : null}
           <View style={styles.billDividerLine} />
           <BillRow label="Total" value={`₹${toPay}`} bold />
         </View>
@@ -134,7 +134,7 @@ export function ReviewOrderScreen({ navigation }: Props) {
         ) : null}
 
         <Text style={styles.termsText}>
-          By placing this order, you agree to our Terms of Service and Refund Policy.
+          By placing this order, you agree to our Terms of Service and Cancellation Policy.
         </Text>
 
         <View style={styles.bottomSpacer} />
@@ -147,31 +147,6 @@ export function ReviewOrderScreen({ navigation }: Props) {
           </Pressable>
         </View>
       </SafeAreaView>
-    </View>
-  );
-}
-
-function BillRow({
-  label,
-  value,
-  labelColor,
-  valueColor,
-  bold,
-}: {
-  label: string;
-  value: string;
-  labelColor?: string;
-  valueColor?: string;
-  bold?: boolean;
-}) {
-  return (
-    <View style={styles.billRow}>
-      <Text style={[styles.billLabel, labelColor ? { color: labelColor } : null, bold && styles.billBold]}>
-        {label}
-      </Text>
-      <Text style={[styles.billValue, valueColor ? { color: valueColor } : null, bold && styles.billBoldValue]}>
-        {value}
-      </Text>
     </View>
   );
 }
@@ -285,29 +260,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#4D7C64',
     paddingTop: 2,
-  },
-  billRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-  },
-  billLabel: {
-    fontSize: 13,
-    color: '#374151',
-  },
-  billValue: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#374151',
-  },
-  billBold: {
-    fontWeight: '700',
-  },
-  billBoldValue: {
-    fontWeight: '800',
-    color: '#1A1A1A',
-    fontSize: 15,
   },
   billDividerLine: {
     height: 1,

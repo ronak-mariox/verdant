@@ -33,12 +33,7 @@ export function HomeTopBar({
     <SafeAreaView edges={['top']} style={styles.container}>
       <View style={styles.topRow}>
         <View style={styles.greetingCol}>
-          <View style={styles.etaRow}>
-            <Text style={styles.eta}>9 mins</Text>
-            <View style={styles.expressBadge}>
-              <Text style={styles.expressText}>Express</Text>
-            </View>
-          </View>
+          <Text style={styles.eta}>Deliver to</Text>
           <Pressable style={styles.locationRow} onPress={onLocationPress}>
             <PinSmall width={12} height={12} />
             <Text style={styles.locationText} numberOfLines={1}>
@@ -83,27 +78,11 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  etaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingTop: 2,
-  },
   eta: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  expressBadge: {
-    backgroundColor: 'rgba(52,195,99,0.25)',
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  expressText: {
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: 'rgba(255,255,255,0.8)',
+    paddingTop: 2,
   },
   locationRow: {
     flexDirection: 'row',

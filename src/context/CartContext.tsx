@@ -3,6 +3,7 @@ import type { ImageSourcePropType } from 'react-native';
 import { api, getErrorMessage } from '../services/api';
 import { resolveProductImage } from '../utils/productImage';
 import { useAuth } from './AuthContext';
+import type { RawCart, RawCartItem, RawPricing, RawUnavailableCartLine } from '../types/api';
 
 export interface CartItem {
   id: string; // `${productId}::${variantId}` — unique per cart line
@@ -15,36 +16,14 @@ export interface CartItem {
   image: ImageSourcePropType;
   quantity: number;
   maxStock: number;
+  /** Server-computed line total after any vendor offer. */
+  subtotal: number;
+  /** Line total before the offer; equals `subtotal` when no offer applied. */
+  originalSubtotal: number;
 }
 
-export interface CartPricing {
-  itemsTotal: number;
-  taxTotal: number;
-  deliveryFee: number;
-  platformFee: number;
-  discount: number;
-  grandTotal: number;
-}
-
-interface RawCartItem {
-  productId: string;
-  variantId: string;
-  name: string;
-  variantLabel: string;
-  imageUrl?: string;
-  price: number;
-  mrp?: number;
-  quantity: number;
-  maxStock: number;
-}
-
-interface RawCartResponse {
-  items: RawCartItem[];
-  unavailable: { productId: string; variantId: string; reason: string }[];
-  couponCode: string | null;
-  couponMessage?: string;
-  pricing: CartPricing;
-}
+export type CartPricing = RawPricing;
+export type UnavailableCartLine = RawUnavailableCartLine;
 
 function toCartItem(raw: RawCartItem): CartItem {
   return {
@@ -58,6 +37,8 @@ function toCartItem(raw: RawCartItem): CartItem {
     image: resolveProductImage(raw.imageUrl),
     quantity: raw.quantity,
     maxStock: raw.maxStock,
+    subtotal: raw.subtotal,
+    originalSubtotal: raw.originalSubtotal ?? raw.subtotal,
   };
 }
 
@@ -68,7 +49,7 @@ interface CartContextValue {
   pricing: CartPricing | null;
   couponCode: string | null;
   couponMessage?: string;
-  unavailable: { productId: string; variantId: string; reason: string }[];
+  unavailable: UnavailableCartLine[];
   addItem: (productId: string, variantId: string, quantity?: number) => Promise<void>;
   increment: (id: string) => Promise<void>;
   decrement: (id: string) => Promise<void>;
@@ -81,17 +62,17 @@ interface CartContextValue {
 
 const CartContext = createContext<CartContextValue | undefined>(undefined);
 
-const EMPTY_CART: RawCartResponse = { items: [], unavailable: [], couponCode: null, pricing: { itemsTotal: 0, taxTotal: 0, deliveryFee: 0, platformFee: 0, discount: 0, grandTotal: 0 } };
+const EMPTY_CART: RawCart = { items: [], unavailable: [], couponCode: null, pricing: { itemsTotal: 0, taxTotal: 0, deliveryFee: 0, platformFee: 0, discount: 0, grandTotal: 0 } };
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
-  const [cart, setCart] = useState<RawCartResponse>(EMPTY_CART);
+  const [cart, setCart] = useState<RawCart>(EMPTY_CART);
   const [isLoading, setIsLoading] = useState(false);
 
   const refreshCart = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { data } = await api.get<RawCartResponse>('/customer/cart');
+      const { data } = await api.get<RawCart>('/customer/cart');
       setCart(data);
     } finally {
       setIsLoading(false);
@@ -107,19 +88,22 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, [isAuthenticated, refreshCart]);
 
   const addItem = useCallback(async (productId: string, variantId: string, quantity = 1) => {
-    const { data } = await api.post<RawCartResponse>('/customer/cart/items', { productId, variantId, quantity });
+    const { data } = await api.post<RawCart>('/customer/cart/items', { productId, variantId, quantity });
     setCart(data);
   }, []);
 
   const setQuantity = useCallback(async (id: string, quantity: number) => {
     const [productId, variantId] = id.split('::');
-    const { data } = await api.patch<RawCartResponse>(`/customer/cart/items/${productId}/${variantId}`, { quantity });
+    const { data } = await api.patch<RawCart>(`/customer/cart/items/${productId}/${variantId}`, { quantity });
     setCart(data);
   }, []);
 
   const increment = useCallback(
     async (id: string) => {
       const current = cart.items.find((i) => `${i.productId}::${i.variantId}` === id);
+      if (current && current.quantity >= current.maxStock) {
+        throw new Error(`Only ${current.maxStock} in stock`);
+      }
       await setQuantity(id, (current?.quantity ?? 0) + 1);
     },
     [cart.items, setQuantity],
@@ -135,18 +119,18 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const removeItem = useCallback(async (id: string) => {
     const [productId, variantId] = id.split('::');
-    const { data } = await api.delete<RawCartResponse>(`/customer/cart/items/${productId}/${variantId}`);
+    const { data } = await api.delete<RawCart>(`/customer/cart/items/${productId}/${variantId}`);
     setCart(data);
   }, []);
 
   const clearCart = useCallback(async () => {
-    const { data } = await api.delete<RawCartResponse>('/customer/cart');
+    const { data } = await api.delete<RawCart>('/customer/cart');
     setCart(data);
   }, []);
 
   const applyCoupon = useCallback(async (code: string) => {
     try {
-      const { data } = await api.post<RawCartResponse>('/customer/cart/coupon', { code });
+      const { data } = await api.post<RawCart>('/customer/cart/coupon', { code });
       setCart(data);
     } catch (err) {
       throw new Error(getErrorMessage(err, 'This coupon cannot be applied'));
@@ -154,7 +138,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const removeCoupon = useCallback(async () => {
-    const { data } = await api.delete<RawCartResponse>('/customer/cart/coupon');
+    const { data } = await api.delete<RawCart>('/customer/cart/coupon');
     setCart(data);
   }, []);
 

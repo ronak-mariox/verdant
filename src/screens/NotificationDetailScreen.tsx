@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { map } from '../assets/images/order';
 import { BackIcon } from '../assets/icons/order';
 import {
   DetailCallIcon,
@@ -15,22 +14,20 @@ import {
   NotifRefundIcon,
   NotifSecurityIcon,
 } from '../assets/icons/profile';
-import type { NotificationKind } from '../data/profile';
+import {
+  getNotificationOrderId,
+  getNotificationOrderNumber,
+  isOrderRated,
+  isTerminalStatus,
+  type NotificationKind,
+  type RawNotification,
+  type RawOrder,
+} from '../types/api';
 import type { AuthStackParamList } from '../navigation/types';
 import { api } from '../services/api';
 import { formatRelativeTime } from '../utils/relativeTime';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'NotificationDetail'>;
-
-interface RawNotification {
-  id: string;
-  kind: NotificationKind;
-  title: string;
-  body: string;
-  orderId?: string;
-  isRead: boolean;
-  createdAt: string;
-}
 
 function KindIcon({ kind }: { kind: NotificationKind }) {
   switch (kind) {
@@ -54,23 +51,36 @@ function KindIcon({ kind }: { kind: NotificationKind }) {
 export function NotificationDetailScreen({ navigation, route }: Props) {
   const { notificationId } = route.params;
   const [notification, setNotification] = useState<RawNotification | null>(null);
-  const [isOutForDelivery, setIsOutForDelivery] = useState(false);
+  const [order, setOrder] = useState<RawOrder | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
     api
       .get<RawNotification>(`/customer/notifications/${notificationId}`)
       .then(({ data }) => {
         setNotification(data);
-        if (data.orderId) {
+        const orderId = getNotificationOrderId(data);
+        if (orderId) {
           api
-            .get<{ status: string }>(`/customer/orders/${data.orderId}`)
-            .then(({ data: order }) => setIsOutForDelivery(order.status === 'out_for_delivery'))
+            .get<RawOrder>(`/customer/orders/${orderId}`)
+            .then(({ data: fetched }) => setOrder(fetched))
             .catch(() => {});
         }
       })
-      .catch(() => {});
+      .catch(() => setLoadFailed(true));
     api.patch(`/customer/notifications/${notificationId}/read`).catch(() => {});
   }, [notificationId]);
+
+  if (loadFailed) {
+    return (
+      <View style={[styles.flex, styles.loadingWrap]}>
+        <Text style={styles.summaryBody}>This notification is no longer available.</Text>
+        <Pressable style={styles.backLink} onPress={() => navigation.goBack()}>
+          <Text style={styles.backLinkText}>← Back to notifications</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   if (!notification) {
     return (
@@ -79,6 +89,9 @@ export function NotificationDetailScreen({ navigation, route }: Props) {
       </View>
     );
   }
+
+  const orderId = getNotificationOrderId(notification);
+  const orderNumber = getNotificationOrderNumber(notification);
 
   return (
     <View style={styles.flex}>
@@ -103,35 +116,37 @@ export function NotificationDetailScreen({ navigation, route }: Props) {
             <Text style={styles.summaryTime}>{formatRelativeTime(notification.createdAt)}</Text>
           </View>
 
-          {isOutForDelivery ? (
-            <View style={styles.mapCard}>
-              <Image source={map} style={styles.mapImage} />
-              <View style={styles.mapOverlay}>
-                <Text style={styles.mapOverlayText}>Your order is on its way</Text>
-              </View>
+          {orderId ? (
+            <View style={styles.actionsWrap}>
+              <Pressable style={styles.actionRow} onPress={() => navigation.navigate('OrderDetails', { orderId })}>
+                <View style={[styles.actionIconWrap, { backgroundColor: '#EFF6FF' }]}>
+                  <DetailHistoryIcon width={16} height={16} />
+                </View>
+                <Text style={styles.actionText}>
+                  View order details{orderNumber ? ` · ${orderNumber}` : ''}
+                </Text>
+              </Pressable>
+              {order && !isTerminalStatus(order.status) ? (
+                <Pressable style={styles.actionRow} onPress={() => navigation.navigate('OrderTracking', { orderId })}>
+                  <View style={[styles.actionIconWrap, { backgroundColor: '#F0FDF4' }]}>
+                    <DetailCallIcon width={16} height={16} />
+                  </View>
+                  <Text style={styles.actionText}>Track order</Text>
+                </Pressable>
+              ) : null}
+              {order && order.status === 'delivered' && !isOrderRated(order) ? (
+                <Pressable
+                  style={styles.actionRow}
+                  onPress={() => navigation.navigate('OrderDetails', { orderId, openRate: true })}
+                >
+                  <View style={[styles.actionIconWrap, { backgroundColor: '#FFFBEB' }]}>
+                    <DetailStarIcon width={16} height={16} />
+                  </View>
+                  <Text style={styles.actionText}>Rate this order</Text>
+                </Pressable>
+              ) : null}
             </View>
           ) : null}
-
-          <View style={styles.actionsWrap}>
-            <Pressable style={styles.actionRow} onPress={() => navigation.navigate('OrderHistory')}>
-              <View style={[styles.actionIconWrap, { backgroundColor: '#EFF6FF' }]}>
-                <DetailHistoryIcon width={16} height={16} />
-              </View>
-              <Text style={styles.actionText}>View order details</Text>
-            </Pressable>
-            <Pressable style={styles.actionRow} onPress={() => navigation.navigate('SupportHome')}>
-              <View style={[styles.actionIconWrap, { backgroundColor: '#F0FDF4' }]}>
-                <DetailCallIcon width={16} height={16} />
-              </View>
-              <Text style={styles.actionText}>Contact delivery partner</Text>
-            </Pressable>
-            <Pressable style={styles.actionRow} onPress={() => navigation.navigate('OrderHistory')}>
-              <View style={[styles.actionIconWrap, { backgroundColor: '#FFFBEB' }]}>
-                <DetailStarIcon width={16} height={16} />
-              </View>
-              <Text style={styles.actionText}>Rate previous order</Text>
-            </Pressable>
-          </View>
 
           <Pressable style={styles.backLink} onPress={() => navigation.goBack()}>
             <Text style={styles.backLinkText}>← Back to notifications</Text>

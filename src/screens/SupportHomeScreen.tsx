@@ -1,10 +1,10 @@
 import React from 'react';
-import { Image, Linking, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Linking, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { BackIcon, ChatIcon, ChevronRightSmallIcon, SearchIcon } from '../assets/icons/order';
+import { BackIcon, ChatIcon, ChevronRightSmallIcon } from '../assets/icons/order';
 import { issueGrid } from '../assets/images/order';
-import { supportFaqs } from '../data/orders';
+import { SUPPORT_EMAIL, SUPPORT_PHONE, supportFaqs } from '../data/orders';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'SupportHome'>;
@@ -19,10 +19,6 @@ export function SupportHomeScreen({ navigation }: Props) {
             <BackIcon width={17} height={17} />
           </Pressable>
           <Text style={styles.headerTitle}>Help &amp; Support</Text>
-        </View>
-        <View style={styles.searchBar}>
-          <SearchIcon width={15} height={15} />
-          <Text style={styles.searchPlaceholder}>Search for help topics…</Text>
         </View>
       </SafeAreaView>
 
@@ -40,11 +36,11 @@ export function SupportHomeScreen({ navigation }: Props) {
             <View style={styles.faqCard}>
               {supportFaqs.map((faq, index) => (
                 <Pressable
-                  key={faq}
+                  key={faq.question}
                   style={[styles.faqRow, index === supportFaqs.length - 1 && styles.faqRowLast]}
-                  onPress={() => navigation.navigate('ReportIssue')}
+                  onPress={() => Alert.alert(faq.question, faq.answer)}
                 >
-                  <Text style={styles.faqText}>{faq}</Text>
+                  <Text style={styles.faqText}>{faq.question}</Text>
                   <ChevronRightSmallIcon width={16} height={16} />
                 </Pressable>
               ))}
@@ -57,24 +53,24 @@ export function SupportHomeScreen({ navigation }: Props) {
               <Pressable style={styles.contactCardGreen} onPress={() => navigation.navigate('ReportIssue')}>
                 <ChatIcon width={24} height={24} />
                 <View style={styles.contactTextWrap}>
-                  <Text style={styles.contactTitle}>Chat with us</Text>
-                  <Text style={styles.contactSubtitle}>Typically replies in &lt; 2 min</Text>
+                  <Text style={styles.contactTitle}>Report an issue</Text>
+                  <Text style={styles.contactSubtitle}>Problem with a specific order</Text>
                 </View>
-                <Text style={styles.contactLinkGreen}>Start chat</Text>
+                <Text style={styles.contactLinkGreen}>Start</Text>
               </Pressable>
-              <Pressable style={styles.contactCardBlue} onPress={() => Linking.openURL('tel:18001234567')}>
+              <Pressable style={styles.contactCardBlue} onPress={() => Linking.openURL(`tel:${SUPPORT_PHONE}`).catch(() => Alert.alert('Call us', SUPPORT_PHONE))}>
                 <Text style={styles.contactEmoji}>📞</Text>
                 <View style={styles.contactTextWrap}>
                   <Text style={styles.contactTitle}>Call us</Text>
-                  <Text style={styles.contactSubtitle}>Available 24×7 · 1800-123-4567</Text>
+                  <Text style={styles.contactSubtitle}>{SUPPORT_PHONE}</Text>
                 </View>
                 <Text style={styles.contactLinkBlue}>Call now</Text>
               </Pressable>
-              <Pressable style={styles.contactCardPurple} onPress={() => Linking.openURL('mailto:support@verdant.app')}>
+              <Pressable style={styles.contactCardPurple} onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}`).catch(() => Alert.alert('Email us', SUPPORT_EMAIL))}>
                 <Text style={styles.contactEmoji}>✉️</Text>
                 <View style={styles.contactTextWrap}>
                   <Text style={styles.contactTitle}>Email support</Text>
-                  <Text style={styles.contactSubtitle}>Response within 24 hours</Text>
+                  <Text style={styles.contactSubtitle}>{SUPPORT_EMAIL}</Text>
                 </View>
                 <Text style={styles.contactLinkPurple}>Send email</Text>
               </Pressable>

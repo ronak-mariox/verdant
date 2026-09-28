@@ -80,10 +80,6 @@ export function ProductDetailsAccordion({ highlights, address, rating, reviews }
               {address?.text ?? 'Add a delivery address to see delivery details'}
             </Text>
           </View>
-          <View style={styles.deliveryTimeRow}>
-            <Text style={styles.deliveryTimeLabel}>Delivery in</Text>
-            <Text style={styles.deliveryTimeValue}>10 mins</Text>
-          </View>
         </View>
       </View>
 

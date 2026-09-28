@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -8,62 +8,35 @@ import { ProductCard } from '../components/home/ProductCard';
 import { useCart } from '../context/CartContext';
 import type { ProductItem } from '../data/home';
 import type { AuthStackParamList } from '../navigation/types';
-import { api } from '../services/api';
-import { resolveProductImage } from '../utils/productImage';
+import { api, getErrorMessage } from '../services/api';
+import { toProductItem } from '../utils/productMappers';
+import { unwrapList, type RawProduct } from '../types/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'SavedItems'>;
 
-interface RawVariant {
-  id: string;
-  label: string;
-  mrp: number;
-  price: number;
-}
-
-interface RawProduct {
-  id: string;
-  name: string;
-  unit?: string;
-  images: string[];
-  variants: RawVariant[];
-}
-
-function toProductItem(product: RawProduct): ProductItem {
-  const variant = product.variants[0];
-  const discountPercent =
-    variant && variant.mrp > 0 ? Math.round(((variant.mrp - variant.price) / variant.mrp) * 100) : 0;
-  return {
-    id: product.id,
-    image: resolveProductImage(product.images[0]),
-    title: product.name,
-    weight: product.unit ?? variant?.label ?? '',
-    price: variant?.price ?? 0,
-    originalPrice: variant?.mrp ?? 0,
-    discountPercent,
-  };
-}
-
 export function SavedItemsScreen({ navigation }: Props) {
   const { addItem } = useCart();
-  const [rawProducts, setRawProducts] = useState<RawProduct[]>([]);
+  const [items, setItems] = useState<ProductItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       api
         .get<RawProduct[]>('/customer/wishlist')
-        .then(({ data }) => setRawProducts(data))
-        .catch(() => {})
+        .then(({ data }) => {
+          setItems(unwrapList(data).map(toProductItem));
+          setError(null);
+        })
+        .catch((err) => setError(getErrorMessage(err)))
         .finally(() => setIsLoading(false));
     }, []),
   );
 
-  const items = rawProducts.map(toProductItem);
-
   const openProduct = (item: ProductItem) => navigation.navigate('ProductDetail', { productId: item.id });
   const handleAddToCart = (item: ProductItem) => {
-    const variantId = rawProducts.find((p) => p.id === item.id)?.variants[0]?.id;
-    if (variantId) addItem(item.id, variantId);
+    if (!item.variantId) return;
+    addItem(item.id, item.variantId).catch((err) => Alert.alert('Could not add to cart', getErrorMessage(err)));
   };
 
   return (
@@ -84,6 +57,11 @@ export function SavedItemsScreen({ navigation }: Props) {
       {isLoading ? (
         <View style={styles.emptyWrap}>
           <ActivityIndicator color="#1CA672" />
+        </View>
+      ) : error && items.length === 0 ? (
+        <View style={styles.emptyWrap}>
+          <Text style={styles.emptyTitle}>Could not load saved items</Text>
+          <Text style={styles.emptySubtitle}>{error}</Text>
         </View>
       ) : items.length === 0 ? (
         <View style={styles.emptyWrap}>

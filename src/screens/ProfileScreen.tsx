@@ -3,7 +3,7 @@ import { Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { BottomNavBar, type NavTab } from '../components/home/BottomNavBar';
+import { BottomNavBar } from '../components/home/BottomNavBar';
 import {
   ChevronRightIcon,
   EditBadgeIcon,
@@ -21,22 +21,10 @@ import { avatar as defaultAvatar } from '../assets/images/profile';
 import type { AuthStackParamList } from '../navigation/types';
 import { useAuth } from '../context/AuthContext';
 import { useCheckout } from '../context/CheckoutContext';
-import { API_ORIGIN, api } from '../services/api';
+import { api } from '../services/api';
+import { absoluteUrl, APP_VERSION } from '../config';
+import { isTerminalStatus, unwrapList, type PagedResponse, type RawOrder } from '../types/api';
 import { fontFamily } from '../theme';
-
-const ACTIVE_ORDER_STATUSES = new Set(['placed', 'accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery']);
-
-interface RawOrderItem {
-  mrp?: number;
-  price: number;
-  quantity: number;
-}
-
-interface RawOrder {
-  status: string;
-  pricing: { discount: number };
-  items: RawOrderItem[];
-}
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Profile'>;
 
@@ -52,15 +40,20 @@ function formatMemberSince(iso?: string | null): string {
 export function ProfileScreen({ navigation }: Props) {
   const { user, logout, refreshUser } = useAuth();
   const { addressList } = useCheckout();
-  const [activeTab, setActiveTab] = useState<NavTab>('profile');
   const [orders, setOrders] = useState<RawOrder[]>([]);
   const [wishlistCount, setWishlistCount] = useState(0);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
-      api.get<RawOrder[]>('/customer/orders').then(({ data }) => setOrders(data)).catch(() => {});
-      api.get<unknown[]>('/customer/wishlist').then(({ data }) => setWishlistCount(data.length)).catch(() => {});
+      api
+        .get<RawOrder[] | PagedResponse<RawOrder>>('/customer/orders')
+        .then(({ data }) => setOrders(unwrapList(data)))
+        .catch(() => {});
+      api
+        .get<unknown[] | PagedResponse<unknown>>('/customer/wishlist')
+        .then(({ data }) => setWishlistCount(unwrapList(data).length))
+        .catch(() => {});
       api
         .get<{ count: number }>('/customer/notifications/unread-count')
         .then(({ data }) => setUnreadNotifications(data.count))
@@ -70,7 +63,7 @@ export function ProfileScreen({ navigation }: Props) {
 
   const ordersCount = orders.length;
   const activeOrdersCount = useMemo(
-    () => orders.filter((o) => ACTIVE_ORDER_STATUSES.has(o.status)).length,
+    () => orders.filter((o) => !isTerminalStatus(o.status)).length,
     [orders],
   );
   const totalSaved = useMemo(
@@ -95,7 +88,7 @@ export function ProfileScreen({ navigation }: Props) {
   }, [navigation, refreshUser]);
 
   const avatarSource = useMemo(
-    () => (user?.avatarUrl ? { uri: `${API_ORIGIN}${user.avatarUrl}` } : defaultAvatar),
+    () => (user?.avatarUrl ? { uri: absoluteUrl(user.avatarUrl) } : defaultAvatar),
     [user?.avatarUrl],
   );
 
@@ -104,18 +97,6 @@ export function ProfileScreen({ navigation }: Props) {
     navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
   };
 
-  const handleTabChange = (tab: NavTab) => {
-    setActiveTab(tab);
-    if (tab === 'home') {
-      navigation.navigate('Home');
-    } else if (tab === 'search') {
-      navigation.navigate('Search');
-    } else if (tab === 'categories') {
-      navigation.navigate('Category');
-    } else if (tab === 'orders') {
-      navigation.navigate('OrderHistory');
-    }
-  };
 
   return (
     <View style={styles.flex}>
@@ -245,11 +226,11 @@ export function ProfileScreen({ navigation }: Props) {
             />
           </View>
 
-          <Text style={styles.footerText}>Version 4.8.2 · Member since {formatMemberSince(user?.createdAt)}</Text>
+          <Text style={styles.footerText}>Version {APP_VERSION} · Member since {formatMemberSince(user?.createdAt)}</Text>
         </View>
       </ScrollView>
 
-      <BottomNavBar active={activeTab} onChange={handleTabChange} />
+      <BottomNavBar active="profile" />
     </View>
   );
 }

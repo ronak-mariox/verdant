@@ -1,61 +1,55 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CheckIcon, PinIcon, SavingsIcon, TrackIcon } from '../assets/icons/order';
-import { api } from '../services/api';
+import { BillRow } from '../components/order/BillRow';
+import { LoadErrorView } from '../components/order/LoadErrorView';
+import { api, getErrorMessage } from '../services/api';
 import { resolveProductImage } from '../utils/productImage';
 import type { AuthStackParamList } from '../navigation/types';
+import { ORDER_STATUS_LABELS, summarizeLines, type RawOrder } from '../types/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'OrderConfirmation'>;
-
-interface RawOrderItem {
-  productId: string;
-  variantId: string;
-  name: string;
-  variantLabel: string;
-  imageUrl?: string;
-  price: number;
-  mrp: number;
-  quantity: number;
-  subtotal: number;
-}
-
-interface RawOrder {
-  id: string;
-  orderNumber: string;
-  items: RawOrderItem[];
-  address: { contactName?: string; line1: string; line2?: string; city: string; state: string; pincode: string };
-  pricing: { itemsTotal: number; taxTotal: number; deliveryFee: number; platformFee: number; discount: number; grandTotal: number };
-  couponCode?: string;
-  placedAt: string;
-}
 
 export function OrderConfirmationScreen({ navigation, route }: Props) {
   const { orderId } = route.params;
   const [order, setOrder] = useState<RawOrder | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
-  useEffect(() => {
-    api.get<RawOrder>(`/customer/orders/${orderId}`).then(({ data }) => setOrder(data));
+  const load = useCallback(() => {
+    setLoaded(false);
+    setError(null);
+    api
+      .get<RawOrder>(`/customer/orders/${orderId}`)
+      .then(({ data }) => setOrder(data))
+      .catch((err) => setError(getErrorMessage(err)))
+      .finally(() => setLoaded(true));
   }, [orderId]);
 
-  const etaBy = useMemo(() => {
-    if (!order) return '';
-    const eta = new Date(new Date(order.placedAt).getTime() + 20 * 60 * 1000);
-    return eta.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  }, [order]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const itemDiscount = useMemo(
-    () => order?.items.reduce((sum, i) => sum + (i.mrp - i.price) * i.quantity, 0) ?? 0,
-    [order],
-  );
-  const savings = itemDiscount + (order?.pricing.discount ?? 0);
+  const { itemTotal, offerDiscount } = useMemo(() => summarizeLines(order?.items ?? []), [order]);
+  const savings = offerDiscount + (order?.pricing.discount ?? 0);
 
-  if (!order) {
+  if (!loaded) {
     return (
       <View style={styles.loadingWrap}>
         <ActivityIndicator color="#1CA672" size="large" />
       </View>
+    );
+  }
+
+  if (error || !order) {
+    return (
+      <LoadErrorView
+        message={error ?? 'Order not found'}
+        onRetry={load}
+        onBack={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })}
+      />
     );
   }
 
@@ -78,8 +72,8 @@ export function OrderConfirmationScreen({ navigation, route }: Props) {
                 <Text style={styles.heroChipValue}>{order.orderNumber}</Text>
               </View>
               <View style={styles.heroChip}>
-                <Text style={styles.heroChipLabel}>ARRIVING BY</Text>
-                <Text style={styles.heroChipValue}>{etaBy}</Text>
+                <Text style={styles.heroChipLabel}>STATUS</Text>
+                <Text style={styles.heroChipValue}>{ORDER_STATUS_LABELS[order.status]}</Text>
               </View>
             </View>
           </View>
@@ -99,7 +93,7 @@ export function OrderConfirmationScreen({ navigation, route }: Props) {
               </View>
             </View>
             <View style={styles.addressBody}>
-              <Text style={styles.addressName}>{order.address.contactName}</Text>
+              {order.address.contactName ? <Text style={styles.addressName}>{order.address.contactName}</Text> : null}
               <Text style={styles.addressLine}>{order.address.line1}</Text>
               <Text style={styles.addressLine}>
                 {[order.address.line2, order.address.city, `${order.address.state} – ${order.address.pincode}`]
@@ -111,7 +105,9 @@ export function OrderConfirmationScreen({ navigation, route }: Props) {
 
           <View style={styles.card}>
             <View style={styles.itemsHeaderRow}>
-              <Text style={styles.itemsHeaderTitle}>{order.items.length} Items</Text>
+              <Text style={styles.itemsHeaderTitle}>
+                {order.items.length} {order.items.length === 1 ? 'Item' : 'Items'}
+              </Text>
               <Pressable onPress={() => navigation.navigate('Home')}>
                 <Text style={styles.editCartLink}>Continue shopping</Text>
               </Pressable>
@@ -121,7 +117,7 @@ export function OrderConfirmationScreen({ navigation, route }: Props) {
                 key={`${item.productId}-${item.variantId}`}
                 style={[styles.itemRow, index === order.items.length - 1 && styles.itemRowLast]}
               >
-                <View style={[styles.itemImageWrap, { backgroundColor: index === 0 ? '#FFF7ED' : '#FEF9C3' }]}>
+                <View style={[styles.itemImageWrap, index === 0 ? styles.itemImageWrapFirst : styles.itemImageWrapRest]}>
                   <Image source={resolveProductImage(item.imageUrl)} style={styles.itemImage} resizeMode="contain" />
                 </View>
                 <View style={styles.itemInfo}>
@@ -140,9 +136,9 @@ export function OrderConfirmationScreen({ navigation, route }: Props) {
               <Text style={styles.cardHeaderTitle}>Bill summary</Text>
             </View>
             <View style={styles.billBody}>
-              <BillRow label="Item total" value={`₹${order.pricing.itemsTotal}`} />
-              {itemDiscount > 0 ? <BillRow label="Item discount" value={`-₹${itemDiscount}`} valueColor="#1CA672" /> : null}
-              {order.couponCode ? (
+              <BillRow label="Item total" value={`₹${itemTotal}`} />
+              {offerDiscount > 0 ? <BillRow label="Offer discount" value={`-₹${offerDiscount}`} valueColor="#1CA672" /> : null}
+              {order.couponCode && order.pricing.discount > 0 ? (
                 <BillRow label={`Coupon ${order.couponCode}`} value={`-₹${order.pricing.discount}`} valueColor="#1CA672" />
               ) : null}
               {order.pricing.taxTotal > 0 ? (
@@ -153,9 +149,11 @@ export function OrderConfirmationScreen({ navigation, route }: Props) {
                 value={order.pricing.deliveryFee === 0 ? 'FREE' : `₹${order.pricing.deliveryFee}`}
                 valueColor="#1CA672"
               />
-              <BillRow label="Platform fee" value={`₹${order.pricing.platformFee}`} labelColor="#9CA3AF" />
+              {order.pricing.platformFee > 0 ? (
+                <BillRow label="Platform fee" value={`₹${order.pricing.platformFee}`} labelColor="#9CA3AF" />
+              ) : null}
               <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Total paid</Text>
+                <Text style={styles.totalLabel}>{order.paymentStatus === 'paid' ? 'Total paid' : 'Total payable'}</Text>
                 <Text style={styles.totalValue}>₹{order.pricing.grandTotal}</Text>
               </View>
             </View>
@@ -191,44 +189,6 @@ export function OrderConfirmationScreen({ navigation, route }: Props) {
   );
 }
 
-function BillRow({
-  label,
-  value,
-  labelColor,
-  valueColor,
-}: {
-  label: string;
-  value: string;
-  labelColor?: string;
-  valueColor?: string;
-}) {
-  return (
-    <View style={billStyles.row}>
-      <Text style={[billStyles.label, labelColor ? { color: labelColor } : null]}>{label}</Text>
-      <Text style={[billStyles.value, valueColor ? { color: valueColor } : null]}>{value}</Text>
-    </View>
-  );
-}
-
-const billStyles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F8F8F8',
-  },
-  label: {
-    fontSize: 13,
-    color: '#374151',
-  },
-  value: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#374151',
-  },
-});
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#F5F5F5' },
@@ -413,6 +373,12 @@ const styles = StyleSheet.create({
   itemImage: {
     width: '100%',
     height: '100%',
+  },
+  itemImageWrapFirst: {
+    backgroundColor: '#FFF7ED',
+  },
+  itemImageWrapRest: {
+    backgroundColor: '#FEF9C3',
   },
   itemInfo: {
     flex: 1,

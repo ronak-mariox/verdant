@@ -1,37 +1,19 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { BackIcon, ReorderPinIcon } from '../assets/icons/order';
+import { BillRow } from '../components/order/BillRow';
+import { LoadErrorView } from '../components/order/LoadErrorView';
 import { useCart } from '../context/CartContext';
 import type { AuthStackParamList } from '../navigation/types';
-import { api } from '../services/api';
+import { api, getErrorMessage } from '../services/api';
 import { resolveProductImage } from '../utils/productImage';
+import { formatOrderDate, type RawOrder, type RawOrderItem } from '../types/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Reorder'>;
 
-const DELIVERY_FEE = 0;
-const PLATFORM_FEE = 5;
-
-interface RawOrderItem {
-  productId: string;
-  variantId: string;
-  name: string;
-  variantLabel: string;
-  imageUrl?: string;
-  price: number;
-  mrp: number;
-  quantity: number;
-  subtotal: number;
-}
-
-interface RawOrder {
-  id: string;
-  orderNumber: string;
-  items: RawOrderItem[];
-  address: { contactName?: string; line1: string; line2?: string; city: string; state: string; pincode: string };
-  placedAt: string;
-}
+const EMPTY_ITEMS: RawOrderItem[] = [];
 
 function lineKey(item: RawOrderItem): string {
   return `${item.productId}::${item.variantId}`;
@@ -41,22 +23,29 @@ export function ReorderScreen({ navigation, route }: Props) {
   const { addItem } = useCart();
   const { orderId } = route.params;
   const [order, setOrder] = useState<RawOrder | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    api.get<RawOrder>(`/customer/orders/${orderId}`).then(({ data }) => {
-      setOrder(data);
-      setQuantities(Object.fromEntries(data.items.map((item) => [lineKey(item), item.quantity])));
-    });
+  const load = useCallback(() => {
+    setLoaded(false);
+    setError(null);
+    api
+      .get<RawOrder>(`/customer/orders/${orderId}`)
+      .then(({ data }) => {
+        setOrder(data);
+        setQuantities(Object.fromEntries(data.items.map((item) => [lineKey(item), item.quantity])));
+      })
+      .catch((err) => setError(getErrorMessage(err)))
+      .finally(() => setLoaded(true));
   }, [orderId]);
 
-  const orderItems = order?.items ?? [];
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const shortDate = useMemo(() => {
-    if (!order) return '';
-    return new Date(order.placedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-  }, [order]);
+  const orderItems = order?.items ?? EMPTY_ITEMS;
 
   const setQuantity = (id: string, delta: number) => {
     setQuantities((prev) => ({ ...prev, [id]: Math.max(0, (prev[id] ?? 0) + delta) }));
@@ -70,30 +59,47 @@ export function ReorderScreen({ navigation, route }: Props) {
     () => orderItems.reduce((sum, item) => sum + item.price * (quantities[lineKey(item)] ?? 0), 0),
     [orderItems, quantities],
   );
-  const total = itemTotal + DELIVERY_FEE + PLATFORM_FEE;
 
   const handlePlaceReorder = async () => {
     if (submitting) return;
     setSubmitting(true);
     try {
-      await Promise.all(
-        orderItems.map((item) => {
-          const qty = quantities[lineKey(item)] ?? 0;
-          return qty > 0 ? addItem(item.productId, item.variantId, qty) : Promise.resolve();
-        }),
+      const selected = orderItems.filter((item) => (quantities[lineKey(item)] ?? 0) > 0);
+      const results = await Promise.allSettled(
+        selected.map((item) => addItem(item.productId, item.variantId, quantities[lineKey(item)])),
       );
-      navigation.navigate('Cart');
+      const failed = results
+        .map((result, index) => (result.status === 'rejected' ? { item: selected[index], reason: result.reason } : null))
+        .filter((entry): entry is { item: RawOrderItem; reason: unknown } => entry !== null);
+
+      const goToCart = () => navigation.replace('Cart');
+      if (failed.length === 0) {
+        goToCart();
+      } else if (failed.length === selected.length) {
+        Alert.alert('Could not add items', getErrorMessage(failed[0].reason));
+      } else {
+        const names = failed.map((f) => `• ${f.item.name}`).join('\n');
+        Alert.alert(
+          `${selected.length - failed.length} of ${selected.length} items added`,
+          `These could not be added:\n${names}`,
+          [{ text: 'Go to cart', onPress: goToCart }],
+        );
+      }
     } finally {
       setSubmitting(false);
     }
   };
 
-  if (!order) {
+  if (!loaded) {
     return (
       <View style={styles.loadingWrap}>
         <ActivityIndicator color="#1CA672" size="large" />
       </View>
     );
+  }
+
+  if (error || !order) {
+    return <LoadErrorView message={error ?? 'Order not found'} onRetry={load} onBack={() => navigation.goBack()} />;
   }
 
   return (
@@ -107,7 +113,7 @@ export function ReorderScreen({ navigation, route }: Props) {
           <View style={styles.headerTitleWrap}>
             <Text style={styles.headerTitle}>Reorder</Text>
             <Text style={styles.headerSubtitle}>
-              From {order.orderNumber} · {shortDate}
+              From {order.orderNumber} · {formatOrderDate(order.placedAt)}
             </Text>
           </View>
         </View>
@@ -118,7 +124,7 @@ export function ReorderScreen({ navigation, route }: Props) {
           <View style={styles.card}>
             <View style={styles.cardHeaderRow}>
               <Text style={styles.cardHeaderTitle}>Items</Text>
-              <Text style={styles.cardHeaderCount}>{cartItemCount} in cart</Text>
+              <Text style={styles.cardHeaderCount}>{cartItemCount} selected</Text>
             </View>
             {orderItems.map((item, index) => {
               const key = lineKey(item);
@@ -158,11 +164,11 @@ export function ReorderScreen({ navigation, route }: Props) {
                 <Text style={styles.cardHeaderTitle}>Delivery address</Text>
               </View>
               <View style={styles.homeTag}>
-                <Text style={styles.homeTagText}>🏠 Home</Text>
+                <Text style={styles.homeTagText}>Last used</Text>
               </View>
             </View>
             <View style={styles.addressBody}>
-              <Text style={styles.addressName}>{order.address.contactName}</Text>
+              {order.address.contactName ? <Text style={styles.addressName}>{order.address.contactName}</Text> : null}
               <Text style={styles.addressLine}>{order.address.line1}</Text>
               <Text style={styles.addressLine}>
                 {[order.address.line2, order.address.city, `${order.address.state} – ${order.address.pincode}`]
@@ -174,15 +180,13 @@ export function ReorderScreen({ navigation, route }: Props) {
 
           <View style={styles.card}>
             <View style={styles.cardHeaderRow}>
-              <Text style={styles.cardHeaderTitle}>Bill summary</Text>
+              <Text style={styles.cardHeaderTitle}>Estimate</Text>
             </View>
             <View style={styles.billBody}>
-              <BillRow label="Item total" value={`₹${itemTotal}`} />
-              <BillRow label="Delivery fee" value={DELIVERY_FEE === 0 ? 'FREE' : `₹${DELIVERY_FEE}`} valueColor="#1CA672" />
-              <BillRow label="Platform fee" value={`₹${PLATFORM_FEE}`} labelColor="#9CA3AF" />
+              <BillRow label="Item total (at last order's prices)" value={`₹${itemTotal}`} />
               <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Total</Text>
-                <Text style={styles.totalValue}>₹{total}</Text>
+                <Text style={styles.totalLabel}>Final bill</Text>
+                <Text style={styles.totalValue}>Shown in cart</Text>
               </View>
             </View>
           </View>
@@ -193,12 +197,8 @@ export function ReorderScreen({ navigation, route }: Props) {
         <View style={styles.footer}>
           <View style={styles.footerTopRow}>
             <View>
-              <Text style={styles.footerItemCount}>{cartItemCount} items</Text>
-              <Text style={styles.footerTotal}>₹{total}</Text>
-            </View>
-            <View style={styles.footerEtaPill}>
-              <View style={styles.footerEtaDot} />
-              <Text style={styles.footerEtaText}>12 min delivery</Text>
+              <Text style={styles.footerItemCount}>{cartItemCount} {cartItemCount === 1 ? 'item' : 'items'}</Text>
+              <Text style={styles.footerTotal}>₹{itemTotal}</Text>
             </View>
           </View>
           <Pressable
@@ -209,7 +209,7 @@ export function ReorderScreen({ navigation, route }: Props) {
             {submitting ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
-              <Text style={styles.placeReorderText}>Place Reorder · ₹{total}</Text>
+              <Text style={styles.placeReorderText}>Add all to cart</Text>
             )}
           </Pressable>
         </View>
@@ -218,44 +218,6 @@ export function ReorderScreen({ navigation, route }: Props) {
   );
 }
 
-function BillRow({
-  label,
-  value,
-  labelColor,
-  valueColor,
-}: {
-  label: string;
-  value: string;
-  labelColor?: string;
-  valueColor?: string;
-}) {
-  return (
-    <View style={billStyles.row}>
-      <Text style={[billStyles.label, labelColor ? { color: labelColor } : null]}>{label}</Text>
-      <Text style={[billStyles.value, valueColor ? { color: valueColor } : null]}>{value}</Text>
-    </View>
-  );
-}
-
-const billStyles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F8F8F8',
-  },
-  label: {
-    fontSize: 13,
-    color: '#374151',
-  },
-  value: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#374151',
-  },
-});
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#F5F5F5' },
@@ -481,26 +443,6 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '800',
     color: '#1A1A1A',
-  },
-  footerEtaPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#F0FDF4',
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  footerEtaDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#1CA672',
-  },
-  footerEtaText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#1CA672',
   },
   placeReorderButton: {
     height: 52,

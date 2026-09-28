@@ -28,7 +28,11 @@ export function SimilarProductCard({ item, onPress, onAdd }: SimilarProductCardP
         <Text style={styles.reviews}>{item.reviews}</Text>
       </View>
 
-      <Text style={styles.deliveryTime}>{item.deliveryTime}</Text>
+      {item.offerLabel ? (
+        <Text style={styles.offerLabel} numberOfLines={1}>
+          {item.offerLabel}
+        </Text>
+      ) : null}
 
       <Text style={styles.pricePerUnit}>{item.pricePerUnit}</Text>
 
@@ -97,7 +101,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#9CA3AF',
   },
-  deliveryTime: {
+  offerLabel: {
     fontSize: 11,
     color: '#1CA672',
     fontWeight: '600',

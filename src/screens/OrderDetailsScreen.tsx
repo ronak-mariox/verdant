@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, Share, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Image, Pressable, ScrollView, Share, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
@@ -9,85 +9,66 @@ import {
   ReorderIcon,
   SupportIcon,
 } from '../assets/icons/order';
+import { BillRow } from '../components/order/BillRow';
+import { LoadErrorView } from '../components/order/LoadErrorView';
 import { OrderProgressTracker } from '../components/order/OrderProgressTracker';
-import { api } from '../services/api';
+import { RateOrderModal } from '../components/order/RateOrderModal';
+import { api, getErrorMessage } from '../services/api';
 import { resolveProductImage } from '../utils/productImage';
 import type { AuthStackParamList } from '../navigation/types';
+import {
+  ORDER_STATUS_LABELS,
+  ORDER_STATUS_STEP,
+  ORDER_STATUS_TEXT,
+  formatOrderDate,
+  isCustomerCancellable,
+  isOrderRated,
+  isTerminalStatus,
+  summarizeLines,
+  type RawOrder,
+} from '../types/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'OrderDetails'>;
 
-type BackendStatus =
-  | 'placed'
-  | 'accepted'
-  | 'preparing'
-  | 'ready_for_pickup'
-  | 'out_for_delivery'
-  | 'delivered'
-  | 'cancelled'
-  | 'rejected';
-
-interface RawOrderItem {
-  productId: string;
-  variantId: string;
-  name: string;
-  variantLabel: string;
-  imageUrl?: string;
-  price: number;
-  mrp: number;
-  quantity: number;
-  subtotal: number;
-}
-
-interface RawOrder {
-  id: string;
-  orderNumber: string;
-  items: RawOrderItem[];
-  address: { contactName?: string; line1: string; line2?: string; city: string; state: string; pincode: string };
-  pricing: { itemsTotal: number; taxTotal: number; deliveryFee: number; platformFee: number; discount: number; grandTotal: number };
-  couponCode?: string;
-  paymentMethod: 'cod' | 'online';
-  status: BackendStatus;
-  placedAt: string;
-  deliveredAt?: string;
-}
-
-const STATUS_LABELS: Record<BackendStatus, string> = {
-  placed: 'Order placed',
-  accepted: 'Accepted',
-  preparing: 'Preparing',
-  ready_for_pickup: 'Ready for pickup',
-  out_for_delivery: 'Out for delivery',
-  delivered: 'Delivered',
-  cancelled: 'Cancelled',
-  rejected: 'Rejected',
+const PAYMENT_LABELS: Record<RawOrder['paymentMethod'], string> = { cod: 'Cash on Delivery', online: 'Online payment' };
+const PAYMENT_STATUS_LABELS: Record<RawOrder['paymentStatus'], string> = {
+  pending: 'Pay at your doorstep',
+  paid: 'Paid',
+  failed: 'Payment failed',
+  refunded: 'Refunded',
 };
-
-const STATUS_INDEX: Partial<Record<BackendStatus, number>> = {
-  placed: 0,
-  accepted: 1,
-  preparing: 1,
-  ready_for_pickup: 2,
-  out_for_delivery: 3,
-  delivered: 4,
-};
-
-const CANCELLABLE_STATUSES: BackendStatus[] = ['placed', 'accepted', 'preparing'];
 
 export function OrderDetailsScreen({ navigation, route }: Props) {
-  const { orderId } = route.params;
+  const { orderId, openRate } = route.params;
   const [order, setOrder] = useState<RawOrder | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [rateVisible, setRateVisible] = useState(false);
+  const [justRated, setJustRated] = useState(false);
 
-  useEffect(() => {
-    api.get<RawOrder>(`/customer/orders/${orderId}`).then(({ data }) => setOrder(data));
+  const load = useCallback(() => {
+    setLoaded(false);
+    setError(null);
+    api
+      .get<RawOrder>(`/customer/orders/${orderId}`)
+      .then(({ data }) => setOrder(data))
+      .catch((err) => setError(getErrorMessage(err)))
+      .finally(() => setLoaded(true));
   }, [orderId]);
 
-  const itemDiscount = useMemo(
-    () => order?.items.reduce((sum, i) => sum + (i.mrp - i.price) * i.quantity, 0) ?? 0,
-    [order],
-  );
-  const savings = itemDiscount + (order?.pricing.discount ?? 0);
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  if (!order) {
+  const canRate = !!order && order.status === 'delivered' && !isOrderRated(order) && !justRated;
+
+  useEffect(() => {
+    if (openRate && canRate) setRateVisible(true);
+  }, [openRate, canRate]);
+
+  const { itemTotal, offerDiscount } = useMemo(() => summarizeLines(order?.items ?? []), [order]);
+
+  if (!loaded) {
     return (
       <View style={styles.loadingWrap}>
         <ActivityIndicator color="#1CA672" size="large" />
@@ -95,18 +76,25 @@ export function OrderDetailsScreen({ navigation, route }: Props) {
     );
   }
 
+  if (error || !order) {
+    return <LoadErrorView message={error ?? 'Order not found'} onRetry={load} onBack={() => navigation.goBack()} />;
+  }
+
   const isCancelledLike = order.status === 'cancelled' || order.status === 'rejected';
   const isDelivered = order.status === 'delivered';
-  const isCancellable = CANCELLABLE_STATUSES.includes(order.status);
-  const activeIndex = isDelivered ? 4 : STATUS_INDEX[order.status] ?? 0;
+  const isTerminal = isTerminalStatus(order.status);
+  const activeIndex = ORDER_STATUS_STEP[order.status] ?? 0;
+  const savings = offerDiscount + order.pricing.discount;
+  const paymentAmountLabel = order.paymentStatus === 'paid' ? 'Total paid' : 'Total payable';
+  const deliveredDateText = order.deliveredAt ? formatOrderDate(order.deliveredAt) : '';
 
-  const placedDate = new Date(order.placedAt);
-  const etaDate = new Date(placedDate.getTime() + 20 * 60 * 1000);
-  const etaMinutes = Math.max(0, Math.round((etaDate.getTime() - Date.now()) / 60000));
-  const etaByText = etaDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  const deliveredDateText = order.deliveredAt
-    ? new Date(order.deliveredAt).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })
-    : '';
+  const handleCancelPress = () => {
+    if (isCustomerCancellable(order.status)) {
+      navigation.navigate('CancelOrder', { orderId: order.id });
+    } else {
+      navigation.navigate('CancelIneligible', { orderId: order.id });
+    }
+  };
 
   return (
     <View style={styles.flex}>
@@ -119,13 +107,13 @@ export function OrderDetailsScreen({ navigation, route }: Props) {
           <View style={styles.headerTitleWrap}>
             <Text style={styles.headerTitle}>Order Details</Text>
             <Text style={styles.headerSubtitle}>
-              {order.orderNumber} · {placedDate.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}
+              {order.orderNumber} · {formatOrderDate(order.placedAt)}
             </Text>
           </View>
           <View style={[styles.statusPill, isCancelledLike && styles.statusPillCancelled]}>
             <View style={[styles.statusDot, isCancelledLike && styles.statusDotCancelled]} />
             <Text style={[styles.statusPillText, isCancelledLike && styles.statusPillTextCancelled]}>
-              {STATUS_LABELS[order.status]}
+              {ORDER_STATUS_LABELS[order.status]}
             </Text>
           </View>
         </View>
@@ -136,46 +124,56 @@ export function OrderDetailsScreen({ navigation, route }: Props) {
           <>
             <View style={styles.trackerSection}>
               <OrderProgressTracker activeIndex={activeIndex} />
-              <Text style={styles.etaText}>
-                {isDelivered ? (
-                  `Delivered${deliveredDateText ? ` on ${deliveredDateText}` : ''}`
-                ) : (
-                  <>
-                    Arriving in <Text style={styles.etaBold}>{etaMinutes} mins</Text> · By {etaByText}
-                  </>
-                )}
+              <Text style={styles.statusText}>
+                {isDelivered
+                  ? `Delivered${deliveredDateText ? ` on ${deliveredDateText}` : ''}`
+                  : ORDER_STATUS_TEXT[order.status]}
               </Text>
+              {!isTerminal ? (
+                <Pressable onPress={() => navigation.navigate('OrderTracking', { orderId: order.id })} hitSlop={6}>
+                  <Text style={styles.cancelLink}>Track order →</Text>
+                </Pressable>
+              ) : null}
             </View>
 
             <View style={styles.divider} />
           </>
-        ) : null}
+        ) : (
+          <Text style={styles.cancelledNote}>
+            {order.cancelReason ? `Reason: ${order.cancelReason}` : ORDER_STATUS_TEXT[order.status]}
+          </Text>
+        )}
 
         <View style={styles.body}>
           <View style={styles.card}>
             <View style={styles.itemsHeaderRow}>
-              <Text style={styles.itemsHeaderTitle}>{order.items.length} Items</Text>
-              <Pressable onPress={() => navigation.navigate('Cart')}>
-                <Text style={styles.editCartLink}>Edit cart</Text>
-              </Pressable>
+              <Text style={styles.itemsHeaderTitle}>
+                {order.items.length} {order.items.length === 1 ? 'Item' : 'Items'}
+              </Text>
             </View>
-            {order.items.map((item, index) => (
-              <View
-                key={`${item.productId}-${item.variantId}`}
-                style={[styles.itemRow, index === order.items.length - 1 && styles.itemRowLast]}
-              >
-                <View style={[styles.itemImageWrap, { backgroundColor: index === 0 ? '#FFF7ED' : '#FEF9C3' }]}>
-                  <Image source={resolveProductImage(item.imageUrl)} style={styles.itemImage} resizeMode="contain" />
+            {order.items.map((item, index) => {
+              const original = item.originalSubtotal ?? item.subtotal;
+              return (
+                <View
+                  key={`${item.productId}-${item.variantId}`}
+                  style={[styles.itemRow, index === order.items.length - 1 && styles.itemRowLast]}
+                >
+                  <View style={[styles.itemImageWrap, index === 0 ? styles.itemImageWrapFirst : styles.itemImageWrapRest]}>
+                    <Image source={resolveProductImage(item.imageUrl)} style={styles.itemImage} resizeMode="contain" />
+                  </View>
+                  <View style={styles.itemInfo}>
+                    <Text style={styles.itemName}>{item.name}</Text>
+                    <Text style={styles.itemSubtitle}>
+                      {item.variantLabel} × {item.quantity}
+                    </Text>
+                  </View>
+                  <View>
+                    <Text style={styles.itemPrice}>₹{item.subtotal}</Text>
+                    {original > item.subtotal ? <Text style={styles.itemOriginal}>₹{original}</Text> : null}
+                  </View>
                 </View>
-                <View style={styles.itemInfo}>
-                  <Text style={styles.itemName}>{item.name}</Text>
-                  <Text style={styles.itemSubtitle}>
-                    {item.variantLabel} × {item.quantity}
-                  </Text>
-                </View>
-                <Text style={styles.itemPrice}>₹{item.subtotal}</Text>
-              </View>
-            ))}
+              );
+            })}
           </View>
 
           <View style={styles.card}>
@@ -183,14 +181,10 @@ export function OrderDetailsScreen({ navigation, route }: Props) {
               <Text style={styles.cardHeaderTitle}>Bill summary</Text>
             </View>
             <View style={styles.billBody}>
-              <BillRow label="Item total" value={`₹${order.pricing.itemsTotal}`} />
-              {itemDiscount > 0 ? <BillRow label="Item discount" value={`-₹${itemDiscount}`} valueColor="#1CA672" /> : null}
-              {order.couponCode ? (
-                <BillRow
-                  label={`Coupon ${order.couponCode}`}
-                  value={`-₹${order.pricing.discount}`}
-                  valueColor="#1CA672"
-                />
+              <BillRow label="Item total" value={`₹${itemTotal}`} />
+              {offerDiscount > 0 ? <BillRow label="Offer discount" value={`-₹${offerDiscount}`} valueColor="#1CA672" /> : null}
+              {order.couponCode && order.pricing.discount > 0 ? (
+                <BillRow label={`Coupon ${order.couponCode}`} value={`-₹${order.pricing.discount}`} valueColor="#1CA672" />
               ) : null}
               {order.pricing.taxTotal > 0 ? (
                 <BillRow label="Taxes" value={`₹${order.pricing.taxTotal}`} labelColor="#9CA3AF" />
@@ -200,9 +194,11 @@ export function OrderDetailsScreen({ navigation, route }: Props) {
                 value={order.pricing.deliveryFee === 0 ? 'FREE' : `₹${order.pricing.deliveryFee}`}
                 valueColor="#1CA672"
               />
-              <BillRow label="Platform fee" value={`₹${order.pricing.platformFee}`} labelColor="#9CA3AF" />
+              {order.pricing.platformFee > 0 ? (
+                <BillRow label="Platform fee" value={`₹${order.pricing.platformFee}`} labelColor="#9CA3AF" />
+              ) : null}
               <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Total paid</Text>
+                <Text style={styles.totalLabel}>{paymentAmountLabel}</Text>
                 <Text style={styles.totalValue}>₹{order.pricing.grandTotal}</Text>
               </View>
             </View>
@@ -229,7 +225,7 @@ export function OrderDetailsScreen({ navigation, route }: Props) {
               </View>
             </View>
             <View style={styles.addressBody}>
-              <Text style={styles.addressName}>{order.address.contactName}</Text>
+              {order.address.contactName ? <Text style={styles.addressName}>{order.address.contactName}</Text> : null}
               <Text style={styles.addressLine}>{order.address.line1}</Text>
               <Text style={styles.addressLine}>
                 {[order.address.line2, order.address.city, `${order.address.state} – ${order.address.pincode}`]
@@ -239,23 +235,28 @@ export function OrderDetailsScreen({ navigation, route }: Props) {
             </View>
           </View>
 
-          <Pressable
-            style={styles.card}
-            onPress={() => Alert.alert('Payment details', `Cash on Delivery\nAmount due: ₹${order.pricing.grandTotal}`)}
-          >
+          <View style={styles.card}>
             <View style={styles.cardHeaderRow}>
               <Text style={styles.cardHeaderTitle}>Payment</Text>
             </View>
             <View style={styles.paymentBody}>
               <View style={styles.paymentRow}>
                 <View style={styles.paymentInfo}>
-                  <Text style={styles.paymentMethod}>Cash on Delivery</Text>
-                  <Text style={styles.paymentAccount}>Pay at your doorstep</Text>
+                  <Text style={styles.paymentMethod}>{PAYMENT_LABELS[order.paymentMethod]}</Text>
+                  <Text style={styles.paymentAccount}>{PAYMENT_STATUS_LABELS[order.paymentStatus]}</Text>
                 </View>
                 <Text style={styles.paymentAmount}>₹{order.pricing.grandTotal}</Text>
               </View>
             </View>
-          </Pressable>
+          </View>
+
+          {canRate ? (
+            <Pressable style={styles.rateButton} onPress={() => setRateVisible(true)}>
+              <Text style={styles.rateButtonText}>★ Rate this order</Text>
+            </Pressable>
+          ) : isDelivered ? (
+            <Text style={styles.ratedText}>Thanks for rating this order</Text>
+          ) : null}
 
           <Pressable
             style={styles.reorderButton}
@@ -270,7 +271,7 @@ export function OrderDetailsScreen({ navigation, route }: Props) {
               style={styles.invoiceButton}
               onPress={() =>
                 Share.share({
-                  message: `Verdant Invoice — Order #${order.orderNumber}\nTotal: ₹${order.pricing.grandTotal}\nPayment: Cash on Delivery`,
+                  message: `Verdant — Order ${order.orderNumber}\nTotal: ₹${order.pricing.grandTotal}\nPayment: ${PAYMENT_LABELS[order.paymentMethod]}`,
                 }).catch(() => {})
               }
             >
@@ -283,58 +284,23 @@ export function OrderDetailsScreen({ navigation, route }: Props) {
             </Pressable>
           </View>
 
-          {isCancellable ? (
-            <Pressable
-              style={styles.cancelLinkWrap}
-              onPress={() => navigation.navigate('CancelOrder', { orderId: order.id })}
-            >
+          {!isTerminal ? (
+            <Pressable style={styles.cancelLinkWrap} onPress={handleCancelPress}>
               <Text style={styles.cancelLink}>Cancel order</Text>
             </Pressable>
           ) : null}
         </View>
       </ScrollView>
+
+      <RateOrderModal
+        visible={rateVisible}
+        orderId={order.id}
+        onClose={() => setRateVisible(false)}
+        onRated={() => setJustRated(true)}
+      />
     </View>
   );
 }
-
-function BillRow({
-  label,
-  value,
-  labelColor,
-  valueColor,
-}: {
-  label: string;
-  value: string;
-  labelColor?: string;
-  valueColor?: string;
-}) {
-  return (
-    <View style={billStyles.row}>
-      <Text style={[billStyles.label, labelColor ? { color: labelColor } : null]}>{label}</Text>
-      <Text style={[billStyles.value, valueColor ? { color: valueColor } : null]}>{value}</Text>
-    </View>
-  );
-}
-
-const billStyles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F8F8F8',
-  },
-  label: {
-    fontSize: 13,
-    color: '#374151',
-  },
-  value: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#374151',
-  },
-});
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#F5F5F5' },
@@ -410,16 +376,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 16,
-  },
-  etaText: {
-    fontSize: 12,
-    color: '#6B7280',
-    paddingTop: 12,
-    paddingHorizontal: 4,
-  },
-  etaBold: {
-    fontWeight: '700',
-    color: '#1CA672',
   },
   divider: {
     height: 8,
@@ -505,11 +461,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1A1A1A',
   },
-  editCartLink: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#1CA672',
-  },
   itemRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -533,6 +484,12 @@ const styles = StyleSheet.create({
   itemImage: {
     width: '100%',
     height: '100%',
+  },
+  itemImageWrapFirst: {
+    backgroundColor: '#FFF7ED',
+  },
+  itemImageWrapRest: {
+    backgroundColor: '#FEF9C3',
   },
   itemInfo: {
     flex: 1,
@@ -719,5 +676,46 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
     color: '#EF4444',
+  },
+  statusText: {
+    fontSize: 13,
+    color: '#374151',
+    textAlign: 'center',
+    paddingTop: 12,
+  },
+  itemOriginal: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    textDecorationLine: 'line-through',
+    textAlign: 'right',
+  },
+  rateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    marginTop: 12,
+  },
+  rateButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#B45309',
+  },
+  ratedText: {
+    fontSize: 13,
+    color: '#6B7280',
+    textAlign: 'center',
+    paddingTop: 12,
+  },
+  cancelledNote: {
+    fontSize: 13,
+    color: '#6B7280',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
 });

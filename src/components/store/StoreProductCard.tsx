@@ -24,7 +24,7 @@ export function StoreProductCard({ item, cardWidth, onPress, onAdd }: StoreProdu
           </View>
         ) : null}
 
-        <Pressable onPress={onAdd} hitSlop={6} style={styles.addButton}>
+        <Pressable onPress={onAdd} hitSlop={6} style={[styles.addButton, !item.inStock && styles.addButtonDisabled]} disabled={!item.inStock}>
           <AddPlusPinkIcon width={18} height={18} />
         </Pressable>
 
@@ -52,16 +52,28 @@ export function StoreProductCard({ item, cardWidth, onPress, onAdd }: StoreProdu
         <Text style={styles.originalPrice}>{`₹${item.originalPrice}`}</Text>
       </View>
 
-      {item.xtraSaverPrice ? (
+      {item.offerLabel ? (
         <View style={styles.xtraSaverPill}>
-          <Text style={styles.xtraSaverText}>{`XtraSaver ₹${item.xtraSaverPrice}`}</Text>
+          <Text style={styles.xtraSaverText} numberOfLines={1}>
+            {item.offerLabel}
+          </Text>
         </View>
       ) : null}
+      {!item.inStock ? <Text style={styles.outOfStock}>Out of stock</Text> : null}
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
+  addButtonDisabled: {
+    opacity: 0.4,
+  },
+  outOfStock: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#DC2626',
+    paddingTop: 4,
+  },
   card: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
