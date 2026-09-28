@@ -1,25 +1,35 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { NavCategories, NavHome, NavOrders, NavProfile, NavSearch } from '../../assets/icons/homescreen';
 import { fontFamily } from '../../theme';
+import type { AuthStackParamList } from '../../navigation/types';
 
 export type NavTab = 'home' | 'search' | 'categories' | 'orders' | 'profile';
 
 interface BottomNavBarProps {
   active: NavTab;
-  onChange: (tab: NavTab) => void;
 }
 
-const TABS: { id: NavTab; label: string; Icon: React.ComponentType<{ width: number; height: number }> }[] = [
-  { id: 'home', label: 'Home', Icon: NavHome },
-  { id: 'search', label: 'Search', Icon: NavSearch },
-  { id: 'categories', label: 'Categories', Icon: NavCategories },
-  { id: 'orders', label: 'Orders', Icon: NavOrders },
-  { id: 'profile', label: 'Profile', Icon: NavProfile },
+const TABS: { id: NavTab; label: string; route: keyof AuthStackParamList; Icon: React.ComponentType<{ width: number; height: number }> }[] = [
+  { id: 'home', label: 'Home', route: 'Home', Icon: NavHome },
+  { id: 'search', label: 'Search', route: 'Search', Icon: NavSearch },
+  { id: 'categories', label: 'Categories', route: 'Category', Icon: NavCategories },
+  { id: 'orders', label: 'Orders', route: 'OrderHistory', Icon: NavOrders },
+  { id: 'profile', label: 'Profile', route: 'Profile', Icon: NavProfile },
 ];
 
-export function BottomNavBar({ active, onChange }: BottomNavBarProps) {
+export function BottomNavBar({ active }: BottomNavBarProps) {
+  const navigation = useNavigation<NativeStackNavigationProp<AuthStackParamList>>();
+
+  // Tabs replace the stack instead of pushing so bouncing between them never piles up screens.
+  const switchTab = (tab: (typeof TABS)[number]) => {
+    if (tab.id === active) return;
+    navigation.reset({ index: 0, routes: [{ name: tab.route as never }] });
+  };
+
   return (
     <SafeAreaView edges={['bottom']} style={styles.container}>
       <View style={styles.row}>
@@ -27,11 +37,7 @@ export function BottomNavBar({ active, onChange }: BottomNavBarProps) {
           const isActive = tab.id === active;
           const Icon = tab.Icon;
           return (
-            <Pressable
-              key={tab.id}
-              onPress={() => onChange(tab.id)}
-              style={[styles.button, isActive && styles.buttonActive]}
-            >
+            <Pressable key={tab.id} onPress={() => switchTab(tab)} style={[styles.button, isActive && styles.buttonActive]}>
               <Icon width={22} height={22} />
               <Text style={[styles.label, isActive && styles.labelActive]}>{tab.label}</Text>
             </Pressable>

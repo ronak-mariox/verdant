@@ -1,14 +1,53 @@
-import React from 'react';
-import { Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { BackIcon, ChatIcon, IneligibleWarnIcon, StatusCurrentIcon } from '../assets/icons/order';
+import { LoadErrorView } from '../components/order/LoadErrorView';
 import { OrderMiniCard } from '../components/order/OrderMiniCard';
+import { api, getErrorMessage } from '../services/api';
+import { resolveProductImage } from '../utils/productImage';
 import type { AuthStackParamList } from '../navigation/types';
+import { ORDER_STATUS_LABELS, ORDER_STATUS_TEXT, formatOrderDate, isCustomerCancellable, type RawOrder } from '../types/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'CancelIneligible'>;
 
-export function CancelIneligibleScreen({ navigation }: Props) {
+const WHY_TEXT: Partial<Record<RawOrder['status'], string>> = {
+  preparing: 'The store has already started preparing your order, so it can no longer be cancelled from the app.',
+  ready_for_pickup: 'Your order is packed and waiting for a delivery partner, so it can no longer be cancelled from the app.',
+  out_for_delivery: 'Your delivery partner has already picked up your order, so it can no longer be cancelled from the app.',
+  delivered: 'This order has already been delivered.',
+  cancelled: 'This order has already been cancelled.',
+  rejected: 'This order was rejected by the store, so there is nothing to cancel.',
+};
+
+export function CancelIneligibleScreen({ navigation, route }: Props) {
+  const { orderId } = route.params;
+  const [order, setOrder] = useState<RawOrder | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  const load = useCallback(() => {
+    setLoaded(false);
+    setError(null);
+    api
+      .get<RawOrder>(`/customer/orders/${orderId}`)
+      .then(({ data }) => setOrder(data))
+      .catch((err) => setError(getErrorMessage(err)))
+      .finally(() => setLoaded(true));
+  }, [orderId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // If the order turns out to be cancellable after all, send the user to the real cancel flow.
+  useEffect(() => {
+    if (order && isCustomerCancellable(order.status)) {
+      navigation.replace('CancelOrder', { orderId: order.id });
+    }
+  }, [navigation, order]);
+
   return (
     <View style={styles.flex}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
@@ -24,86 +63,75 @@ export function CancelIneligibleScreen({ navigation }: Props) {
         </View>
       </SafeAreaView>
 
-      <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
-        <View style={styles.body}>
-          <OrderMiniCard />
-
-          <View style={styles.errorCard}>
-            <View style={styles.errorHeaderRow}>
-              <View style={styles.errorIconWrap}>
-                <IneligibleWarnIcon width={20} height={20} />
-              </View>
-              <View style={styles.errorTextWrap}>
-                <Text style={styles.errorTitle}>Order cannot be cancelled</Text>
-                <Text style={styles.errorSubtitle}>Cancellation window has passed</Text>
-              </View>
-            </View>
-            <View style={styles.windowRow}>
-              <Text style={styles.windowLabel}>Cancellation window</Text>
-              <View style={styles.windowRight}>
-                <View style={styles.windowBadge}>
-                  <Text style={styles.windowBadgeText}>0:00</Text>
-                </View>
-                <Text style={styles.windowExpired}>expired</Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.card}>
-            <Text style={styles.statusLabel}>CURRENT STATUS</Text>
-            <View style={styles.statusRow}>
-              <View style={styles.statusIconWrap}>
-                <StatusCurrentIcon width={18} height={18} />
-              </View>
-              <View style={styles.statusTextWrap}>
-                <Text style={styles.statusTitle}>Out for delivery</Text>
-                <Text style={styles.statusSubtitle}>Rajesh K. picked up your order at 2:24 PM</Text>
-              </View>
-              <View style={styles.liveBadge}>
-                <View style={styles.liveDot} />
-                <Text style={styles.liveBadgeText}>Live</Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Why can&apos;t I cancel?</Text>
-            <Text style={styles.cardBody}>
-              Your delivery partner has already picked up your order. Cancellations are only possible within 60
-              seconds of placing the order or before the order is picked up for delivery.
-            </Text>
-          </View>
-
-          <Text style={styles.sectionLabel}>WHAT YOU CAN DO</Text>
-
-          <Pressable style={styles.optionCardGreen} onPress={() => navigation.navigate('OrderTracking')}>
-            <Text style={styles.optionEmoji}>📦</Text>
-            <View style={styles.optionTextWrap}>
-              <Text style={styles.optionTitle}>Accept the delivery</Text>
-              <Text style={styles.optionSubtitle}>Receive your order, then raise a return request if needed</Text>
-            </View>
-            <Text style={styles.optionLinkGreen}>Track Order →</Text>
-          </Pressable>
-
-          <Pressable style={styles.optionCardBlue} onPress={() => navigation.navigate('SupportHome')}>
-            <ChatIcon width={22} height={22} />
-            <View style={styles.optionTextWrap}>
-              <Text style={styles.optionTitle}>Contact support</Text>
-              <Text style={styles.optionSubtitle}>Our team will do their best to help in exceptional cases</Text>
-            </View>
-            <Text style={styles.optionLinkBlue}>Chat Now →</Text>
-          </Pressable>
-
-          <Pressable style={styles.optionCardPurple} onPress={() => navigation.navigate('ReportIssue')}>
-            <Text style={styles.optionEmoji}>📝</Text>
-            <View style={styles.optionTextWrap}>
-              <Text style={styles.optionTitle}>Raise an issue</Text>
-              <Text style={styles.optionSubtitle}>Report the order after delivery for a possible refund</Text>
-            </View>
-            <Text style={styles.optionLinkPurple}>Raise Issue →</Text>
-          </Pressable>
+      {!loaded ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator color="#1CA672" size="large" />
         </View>
-      </ScrollView>
+      ) : error || !order ? (
+        <LoadErrorView message={error ?? 'Order not found'} onRetry={load} onBack={() => navigation.goBack()} />
+      ) : (
+        <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
+          <View style={styles.body}>
+            <OrderMiniCard
+              orderNumber={order.orderNumber}
+              date={formatOrderDate(order.placedAt)}
+              itemCount={order.items.length}
+              total={order.pricing.grandTotal}
+              thumbs={order.items.slice(0, 3).map((item) => resolveProductImage(item.imageUrl))}
+            />
+
+            <View style={styles.errorCard}>
+              <View style={styles.errorHeaderRow}>
+                <View style={styles.errorIconWrap}>
+                  <IneligibleWarnIcon width={20} height={20} />
+                </View>
+                <View style={styles.errorTextWrap}>
+                  <Text style={styles.errorTitle}>Order cannot be cancelled</Text>
+                  <Text style={styles.errorSubtitle}>Cancellation is only possible before the store starts preparing</Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.statusLabel}>CURRENT STATUS</Text>
+              <View style={styles.statusRow}>
+                <View style={styles.statusIconWrap}>
+                  <StatusCurrentIcon width={18} height={18} />
+                </View>
+                <View style={styles.statusTextWrap}>
+                  <Text style={styles.statusTitle}>{ORDER_STATUS_LABELS[order.status]}</Text>
+                  <Text style={styles.statusSubtitle}>{ORDER_STATUS_TEXT[order.status]}</Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Why can&apos;t I cancel?</Text>
+              <Text style={styles.cardBody}>{WHY_TEXT[order.status] ?? 'This order can no longer be cancelled from the app.'}</Text>
+            </View>
+
+            <Text style={styles.sectionLabel}>WHAT YOU CAN DO</Text>
+
+            <Pressable style={styles.optionCardGreen} onPress={() => navigation.navigate('OrderTracking', { orderId: order.id })}>
+              <Text style={styles.optionEmoji}>📦</Text>
+              <View style={styles.optionTextWrap}>
+                <Text style={styles.optionTitle}>Accept the delivery</Text>
+                <Text style={styles.optionSubtitle}>Receive your order, then report any problem with it</Text>
+              </View>
+              <Text style={styles.optionLinkGreen}>Track Order →</Text>
+            </Pressable>
+
+            <Pressable style={styles.optionCardBlue} onPress={() => navigation.navigate('SupportHome')}>
+              <ChatIcon width={22} height={22} />
+              <View style={styles.optionTextWrap}>
+                <Text style={styles.optionTitle}>Contact support</Text>
+                <Text style={styles.optionSubtitle}>Our team will do their best to help in exceptional cases</Text>
+              </View>
+              <Text style={styles.optionLinkBlue}>Get help →</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -181,44 +209,6 @@ const styles = StyleSheet.create({
     color: '#EF4444',
     paddingTop: 2,
   },
-  windowRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(239,68,68,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.15)',
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginTop: 12,
-  },
-  windowLabel: {
-    fontSize: 12,
-    color: '#991B1B',
-  },
-  windowRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  windowBadge: {
-    backgroundColor: '#EF4444',
-    borderRadius: 8,
-    height: 28,
-    minWidth: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  windowBadgeText: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  windowExpired: {
-    fontSize: 11,
-    color: '#9CA3AF',
-  },
   card: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
@@ -264,28 +254,6 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     paddingTop: 1,
   },
-  liveBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#F0FDF4',
-    borderWidth: 1,
-    borderColor: '#BBF7D0',
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  liveDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: '#1CA672',
-  },
-  liveBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#1CA672',
-  },
   cardTitle: {
     fontSize: 13,
     fontWeight: '700',
@@ -324,16 +292,6 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     padding: 16,
   },
-  optionCardPurple: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: '#FDF4FF',
-    borderWidth: 1,
-    borderColor: '#E9D5FF',
-    borderRadius: 24,
-    padding: 16,
-  },
   optionEmoji: {
     fontSize: 26,
   },
@@ -360,9 +318,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#3B82F6',
   },
-  optionLinkPurple: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#7C3AED',
+  loadingWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

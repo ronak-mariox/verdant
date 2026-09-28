@@ -11,7 +11,10 @@ import { useAuth } from '../context/AuthContext';
 type Props = NativeStackScreenProps<AuthStackParamList, 'Splash'>;
 
 const LOGO_ASPECT_RATIO = 293 / 117;
-const MIN_VISIBLE_MS = 2200;
+const MIN_VISIBLE_MS = 1200;
+// Upper bound on how long the bar waits for session restore before completing anyway;
+// an unreachable backend must not hold the user on the splash screen.
+const MAX_WAIT_MS = 4000;
 
 export function SplashScreen({ navigation }: Props) {
   const { width: screenWidth } = useWindowDimensions();
@@ -20,16 +23,9 @@ export function SplashScreen({ navigation }: Props) {
   const { isLoading, isAuthenticated } = useAuth();
   const progress = useRef(new Animated.Value(0)).current;
   const [minTimeElapsed, setMinTimeElapsed] = useState(false);
+  const [maxTimeElapsed, setMaxTimeElapsed] = useState(false);
   const finished = useRef(false);
 
-  // A real, visibly-filling progress bar: it always takes MIN_VISIBLE_MS to sweep
-  // 0 -> 92%, the way a loading bar actually reads to someone watching it — the
-  // session-restore check (AsyncStorage -> GET /customer/me) usually finishes in
-  // a few ms, which is why a bar that just tracked that check looked like it
-  // snapped instantly instead of animating. Completion (92% -> 100%) waits for
-  // BOTH that minimum duration AND the real check, so it still reflects actual
-  // state — a returning, already-logged-in user is sent straight to Home once
-  // both are done instead of seeing Login again.
   useEffect(() => {
     Animated.timing(progress, {
       toValue: 0.92,
@@ -38,12 +34,18 @@ export function SplashScreen({ navigation }: Props) {
       useNativeDriver: false,
     }).start();
 
-    const timer = setTimeout(() => setMinTimeElapsed(true), MIN_VISIBLE_MS);
-    return () => clearTimeout(timer);
+    const minTimer = setTimeout(() => setMinTimeElapsed(true), MIN_VISIBLE_MS);
+    const maxTimer = setTimeout(() => setMaxTimeElapsed(true), MAX_WAIT_MS);
+    return () => {
+      clearTimeout(minTimer);
+      clearTimeout(maxTimer);
+    };
   }, [progress]);
 
+  const restoreSettled = !isLoading || maxTimeElapsed;
+
   useEffect(() => {
-    if (isLoading || !minTimeElapsed || finished.current) return;
+    if (!restoreSettled || !minTimeElapsed || finished.current) return;
     finished.current = true;
     Animated.timing(progress, {
       toValue: 1,
@@ -53,7 +55,12 @@ export function SplashScreen({ navigation }: Props) {
     }).start(() => {
       if (isAuthenticated) navigation.replace('Home');
     });
-  }, [isLoading, minTimeElapsed, isAuthenticated, navigation, progress]);
+  }, [restoreSettled, minTimeElapsed, isAuthenticated, navigation, progress]);
+
+  // If restore finishes late (after the bar already completed) and the user is signed in, still go Home.
+  useEffect(() => {
+    if (finished.current && !isLoading && isAuthenticated) navigation.replace('Home');
+  }, [isLoading, isAuthenticated, navigation]);
 
   const progressWidth = progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
 
@@ -85,16 +92,16 @@ export function SplashScreen({ navigation }: Props) {
 
         <Pressable
           accessibilityRole="button"
-          disabled={isLoading}
-          onPress={() => navigation.replace('LocationPermission')}
+          disabled={!restoreSettled}
+          onPress={() => navigation.replace(isAuthenticated ? 'Home' : 'LocationPermission')}
           style={({ pressed }) => [
             styles.button,
             shadows.buttonSoft,
-            isLoading && styles.buttonDisabled,
+            !restoreSettled && styles.buttonDisabled,
             pressed && styles.pressed,
           ]}
         >
-          <Text style={styles.buttonLabel}>{isLoading ? 'Loading…' : 'Get Started'}</Text>
+          <Text style={styles.buttonLabel}>{restoreSettled ? 'Get Started' : 'Loading…'}</Text>
         </Pressable>
 
         <Text style={styles.terms}>By continuing, you agree to our Terms &amp; Privacy Policy</Text>

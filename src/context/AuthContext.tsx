@@ -2,9 +2,12 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, api, clearStoredTokens, onForceLogout } from '../services/api';
+import { resetToLogin } from '../navigation/navigationRef';
 
-const SESSION_RESTORE_RETRIES = 2;
+const SESSION_RESTORE_RETRIES = 1;
 const SESSION_RESTORE_RETRY_DELAY_MS = 800;
+// Short per-attempt timeout so an unreachable backend can't hold the splash screen for ~45s.
+const SESSION_RESTORE_TIMEOUT_MS = 4000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(() => resolve(), ms));
@@ -61,9 +64,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Let the api layer force a logout (e.g. refresh token rejected) without importing React.
+  // Let the api layer force a logout (refresh token rejected, account restricted) without importing React.
   useEffect(() => {
-    onForceLogout(() => setUser(null));
+    onForceLogout(() => {
+      setUser(null);
+      resetToLogin();
+    });
   }, []);
 
   const refreshUser = useCallback(async () => {
@@ -88,7 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       for (let attempt = 0; attempt <= SESSION_RESTORE_RETRIES; attempt++) {
         try {
-          const { data } = await api.get<AuthUser>('/customer/me');
+          const { data } = await api.get<AuthUser>('/customer/me', { timeout: SESSION_RESTORE_TIMEOUT_MS });
           if (!cancelled) setUser(data);
           break;
         } catch (err) {

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -13,6 +14,8 @@ import {
   SettingsTermsIcon,
 } from '../assets/icons/profile';
 import type { AuthStackParamList } from '../navigation/types';
+import { APP_VERSION } from '../config';
+import { useAuth } from '../context/AuthContext';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Settings'>;
 
@@ -49,19 +52,70 @@ function LinkRow({ icon, title, onPress, last }: {
   );
 }
 
+const SETTINGS_STORAGE_KEY = 'verdant_settings';
+
+interface Prefs {
+  orderUpdates: boolean;
+  offersPromos: boolean;
+  priceDrops: boolean;
+  reorderReminders: boolean;
+  pushNotifications: boolean;
+  locationAccess: boolean;
+  personalizedAds: boolean;
+  dataSharing: boolean;
+  darkMode: boolean;
+  language: string;
+}
+
+const DEFAULT_PREFS: Prefs = {
+  orderUpdates: true,
+  offersPromos: true,
+  priceDrops: false,
+  reorderReminders: true,
+  pushNotifications: true,
+  locationAccess: true,
+  personalizedAds: false,
+  dataSharing: false,
+  darkMode: false,
+  language: 'English',
+};
+
 export function SettingsScreen({ navigation }: Props) {
-  const [orderUpdates, setOrderUpdates] = useState(true);
-  const [offersPromos, setOffersPromos] = useState(true);
-  const [priceDrops, setPriceDrops] = useState(false);
-  const [reorderReminders, setReorderReminders] = useState(true);
-  const [pushNotifications, setPushNotifications] = useState(true);
+  const { logout } = useAuth();
+  const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
 
-  const [locationAccess, setLocationAccess] = useState(true);
-  const [personalizedAds, setPersonalizedAds] = useState(false);
-  const [dataSharing, setDataSharing] = useState(false);
+  useEffect(() => {
+    AsyncStorage.getItem(SETTINGS_STORAGE_KEY)
+      .then((stored) => {
+        if (stored) setPrefs({ ...DEFAULT_PREFS, ...(JSON.parse(stored) as Partial<Prefs>) });
+      })
+      .catch(() => {});
+  }, []);
 
-  const [darkMode, setDarkMode] = useState(false);
-  const [language, setLanguage] = useState('English');
+  const setPref = <K extends keyof Prefs>(key: K) => (value: Prefs[K]) => {
+    setPrefs((prev) => {
+      const next = { ...prev, [key]: value };
+      AsyncStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  };
+
+  const { orderUpdates, offersPromos, priceDrops, reorderReminders, pushNotifications, locationAccess, personalizedAds, dataSharing, darkMode, language } = prefs;
+  const setOrderUpdates = setPref('orderUpdates');
+  const setOffersPromos = setPref('offersPromos');
+  const setPriceDrops = setPref('priceDrops');
+  const setReorderReminders = setPref('reorderReminders');
+  const setPushNotifications = setPref('pushNotifications');
+  const setLocationAccess = setPref('locationAccess');
+  const setPersonalizedAds = setPref('personalizedAds');
+  const setDataSharing = setPref('dataSharing');
+  const setDarkMode = setPref('darkMode');
+  const setLanguage = setPref('language');
+
+  const handleLogout = async () => {
+    await logout();
+    navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+  };
 
   const openLegal = (title: string, body: string) => {
     Alert.alert(title, body, [{ text: 'OK' }]);
@@ -137,13 +191,13 @@ export function SettingsScreen({ navigation }: Props) {
               icon={<SettingsRefundIcon width={16} height={16} />}
               title="Refund Policy"
               onPress={() =>
-                openLegal('Refund Policy', 'Refunds for cancelled or returned orders are processed to your original payment method within 5-7 business days.')
+                openLegal('Refund Policy', 'Verdant currently accepts Cash on Delivery only, so cancelled orders are never charged and there is nothing to refund.')
               }
             />
             <LinkRow
               icon={<SettingsAboutIcon width={16} height={16} />}
               title="About Verdant"
-              onPress={() => openLegal('About Verdant', 'Verdant v4.8.2 — fresh groceries delivered to your door in minutes.')}
+              onPress={() => openLegal('About Verdant', `Verdant v${APP_VERSION} — fresh groceries delivered to your door.`)}
               last
             />
           </View>
@@ -151,7 +205,7 @@ export function SettingsScreen({ navigation }: Props) {
           <View style={styles.card}>
             <Pressable
               style={styles.logoutRow}
-              onPress={() => navigation.reset({ index: 0, routes: [{ name: 'Login' }] })}
+              onPress={handleLogout}
             >
               <View style={styles.linkIconWrap}>
                 <SettingsLogoutIcon width={16} height={16} />

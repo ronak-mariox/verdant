@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   FlatList,
   Image,
   Pressable,
@@ -14,34 +13,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ChevronRightSmall } from '../assets/icons';
-import { MicIcon, SearchIconHome } from '../assets/icons/homescreen';
-import { BottomNavBar, type NavTab } from '../components/home/BottomNavBar';
-import { categoryPromoCards, recentlyViewed } from '../data/categories';
+import { SearchIconHome } from '../assets/icons/homescreen';
+import { BottomNavBar } from '../components/home/BottomNavBar';
 import type { AuthStackParamList } from '../navigation/types';
 import { api } from '../services/api';
+import type { RawCategory } from '../types/api';
 import { resolveCategoryIcon } from '../utils/categoryIcon';
 import { colors, fontFamily, radius, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Category'>;
-
-interface RawSubcategory {
-  id: string;
-  name: string;
-  imageUrl?: string;
-  isActive: boolean;
-}
-
-interface RawCategory {
-  id: string;
-  name: string;
-  slug: string;
-  imageUrl?: string;
-  sortOrder: number;
-  isActive: boolean;
-  showOnHome: boolean;
-  subcategories: RawSubcategory[];
-}
 
 const TILE_BACKGROUNDS = ['#F0FDF4', '#FFFBEB', '#FDF2F8', '#F0F9FF', '#F5F3FF'];
 
@@ -51,7 +31,6 @@ const HORIZONTAL_PADDING = 16;
 
 export function CategoryScreen({ navigation }: Props) {
   const { width: screenWidth } = useWindowDimensions();
-  const [activeTab, setActiveTab] = useState<NavTab>('categories');
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [mainCategories, setMainCategories] = useState<RawCategory[]>([]);
 
@@ -64,13 +43,6 @@ export function CategoryScreen({ navigation }: Props) {
 
   const tileSize = (screenWidth - HORIZONTAL_PADDING * 2 - GRID_GAP * (GRID_COLUMNS - 1)) / GRID_COLUMNS;
 
-  const handleTabChange = (tab: NavTab) => {
-    setActiveTab(tab);
-    if (tab === 'home') navigation.navigate('Home');
-    else if (tab === 'search') navigation.navigate('Search');
-    else if (tab === 'orders') navigation.navigate('OrderHistory');
-    else if (tab === 'profile') navigation.navigate('Profile');
-  };
 
   const openSubcategory = (categoryId: string, subcategoryId: string) =>
     navigation.navigate('CategoryDetail', { categoryId, subcategoryId });
@@ -122,7 +94,6 @@ export function CategoryScreen({ navigation }: Props) {
             <Text style={styles.searchPlaceholder} numberOfLines={1}>
               Search atta, dal & more
             </Text>
-            <MicIcon width={18} height={18} />
           </Pressable>
         </View>
 
@@ -150,37 +121,6 @@ export function CategoryScreen({ navigation }: Props) {
 
       <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
         {activeCategory === 'all' ? (
-          <View style={styles.recentSection}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.recentTitle}>Recently Viewed</Text>
-              <Pressable hitSlop={8}>
-                <Text style={styles.seeAll}>See all</Text>
-              </Pressable>
-            </View>
-            <FlatList
-              horizontal
-              data={recentlyViewed}
-              keyExtractor={(item) => item.id}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.recentRow}
-              renderItem={({ item }) => (
-                <Pressable
-                  style={styles.recentItem}
-                  onPress={() => openSubcategory(item.categoryId, item.subcategoryId)}
-                >
-                  <View style={styles.recentIconWrap}>
-                    <Image source={item.icon} style={styles.recentIcon} resizeMode="cover" />
-                  </View>
-                  <Text style={styles.recentLabel} numberOfLines={1}>
-                    {item.label}
-                  </Text>
-                </Pressable>
-              )}
-            />
-          </View>
-        ) : null}
-
-        {activeCategory === 'all' ? (
           <View style={styles.bannerSection}>
             <Pressable onPress={() => navigation.navigate('Search')}>
               <LinearGradient
@@ -204,35 +144,10 @@ export function CategoryScreen({ navigation }: Props) {
 
         {visibleCategories.map((category, index) => renderCategorySection(category, index))}
 
-        {activeCategory === 'all' ? (
-          <View style={styles.likeSection}>
-            <Text style={styles.recentTitle}>You might like</Text>
-            <View style={styles.likeCards}>
-              {categoryPromoCards.map((card) => (
-                <View key={card.id} style={styles.likeCard}>
-                  <Image source={card.icon} style={styles.likeCardImage} resizeMode="cover" />
-                  <View style={styles.likeCardBody}>
-                    <View style={styles.likeCardTitleRow}>
-                      <Text style={styles.likeCardTitle}>{card.title}</Text>
-                      <View style={styles.likeCardBadge}>
-                        <Text style={styles.likeCardBadgeText}>{card.badge}</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.likeCardSubtitle}>{card.subtitle}</Text>
-                  </View>
-                  <View style={styles.likeCardChevron}>
-                    <ChevronRightSmall width={16} height={16} />
-                  </View>
-                </View>
-              ))}
-            </View>
-          </View>
-        ) : null}
-
         <View style={styles.scrollBottomSpace} />
       </ScrollView>
 
-      <BottomNavBar active={activeTab} onChange={handleTabChange} />
+      <BottomNavBar active="categories" />
     </View>
   );
 }
@@ -307,47 +222,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     color: colors.brand.primaryDark,
-  },
-  recentSection: {
-    paddingTop: spacing.lg,
-    paddingHorizontal: HORIZONTAL_PADDING,
-  },
-  recentTitle: {
-    fontFamily: fontFamily.headingBold,
-    fontSize: 15,
-    lineHeight: 22.5,
-    color: colors.text.heading,
-  },
-  recentRow: {
-    gap: spacing.sm,
-    paddingTop: 10,
-    paddingBottom: spacing.xxs,
-  },
-  recentItem: {
-    alignItems: 'center',
-    gap: 6,
-  },
-  recentIconWrap: {
-    width: 62,
-    height: 62,
-    borderRadius: radius.md,
-    backgroundColor: colors.background.surfaceMuted,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-  },
-  recentIcon: {
-    width: '100%',
-    height: '100%',
-  },
-  recentLabel: {
-    fontFamily: fontFamily.bodyMedium,
-    fontSize: 10,
-    lineHeight: 13,
-    color: colors.text.buttonNeutral,
-    textAlign: 'center',
   },
   bannerSection: {
     paddingTop: spacing.lg,
@@ -447,73 +321,6 @@ const styles = StyleSheet.create({
     lineHeight: 13.65,
     color: colors.text.buttonNeutral,
     textAlign: 'center',
-  },
-  likeSection: {
-    paddingHorizontal: HORIZONTAL_PADDING,
-    paddingTop: spacing.xl,
-    paddingBottom: spacing.xs,
-  },
-  likeCards: {
-    gap: spacing.sm,
-    paddingTop: spacing.sm,
-  },
-  likeCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    height: 80,
-    backgroundColor: colors.background.screen,
-    borderWidth: 1,
-    borderColor: colors.border.light,
-    borderRadius: radius.md,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-  },
-  likeCardImage: {
-    width: 80,
-    height: 80,
-  },
-  likeCardBody: {
-    flex: 1,
-    minWidth: 0,
-    paddingRight: spacing.md,
-  },
-  likeCardTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  likeCardTitle: {
-    fontFamily: fontFamily.headingBold,
-    fontSize: 14,
-    lineHeight: 21,
-    color: colors.text.heading,
-  },
-  likeCardBadge: {
-    backgroundColor: '#DCFCE7',
-    borderRadius: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  likeCardBadgeText: {
-    fontFamily: fontFamily.bodyBold,
-    fontSize: 8,
-    lineHeight: 12,
-    letterSpacing: 0.5,
-    color: colors.brand.primaryDark,
-  },
-  likeCardSubtitle: {
-    fontFamily: fontFamily.bodyRegular,
-    fontSize: 11,
-    lineHeight: 16.5,
-    color: colors.text.body,
-    paddingTop: 4,
-  },
-  likeCardChevron: {
-    paddingRight: spacing.sm,
   },
   scrollBottomSpace: {
     height: spacing.md,

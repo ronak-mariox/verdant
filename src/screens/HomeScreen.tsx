@@ -1,9 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Image, Pressable, RefreshControl, ScrollView, StatusBar, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CartIcon } from '../assets/icons/store';
-import { BottomNavBar, type NavTab } from '../components/home/BottomNavBar';
+import { BottomNavBar } from '../components/home/BottomNavBar';
 import { CategoryTabs } from '../components/home/CategoryTabs';
 import { HomeTopBar } from '../components/home/HomeTopBar';
 import { ImageCardRow } from '../components/home/ImageCardRow';
@@ -11,12 +11,15 @@ import { ProductRow } from '../components/home/ProductRow';
 import { SectionHeader } from '../components/home/SectionHeader';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
-import { API_ORIGIN, api } from '../services/api';
-import { resolveProductImage } from '../utils/productImage';
+import { useCheckout } from '../context/CheckoutContext';
+import { absoluteUrl } from '../config';
+import { api } from '../services/api';
+import { alertCartError } from '../utils/cartAlerts';
+import { resolveCategoryCoverIcon } from '../utils/categoryIcon';
+import { toProductItem } from '../utils/productMappers';
 import { avatar as defaultAvatar } from '../assets/images/home';
 import {
   banners,
-  categoryTabs,
   essentialTileLinks,
   essentialTiles,
   featuredPickLinks,
@@ -24,28 +27,14 @@ import {
   promoTiles,
   storeCards,
   type CategoryLink,
+  type CategoryTab,
   type ProductItem,
 } from '../data/home';
-import { CATEGORY_TAB_TARGETS } from '../data/categoryTabTargets';
 import type { AuthStackParamList } from '../navigation/types';
-
-interface RawVariant {
-  id: string;
-  label: string;
-  mrp: number;
-  price: number;
-  stock: number;
-}
-
-interface RawProduct {
-  id: string;
-  name: string;
-  unit?: string;
-  images: string[];
-  variants: RawVariant[];
-}
+import type { RawCategory, RawProduct } from '../types/api';
 
 interface RawHomeResponse {
+  categories?: RawCategory[];
   topDeals: RawProduct[];
   saverItems: RawProduct[];
   essentialItems: RawProduct[];
@@ -53,45 +42,24 @@ interface RawHomeResponse {
   monsoonItems: RawProduct[];
 }
 
-function toProductItem(product: RawProduct): ProductItem {
-  const variant = product.variants[0];
-  const discountPercent =
-    variant && variant.mrp > 0 ? Math.round(((variant.mrp - variant.price) / variant.mrp) * 100) : 0;
-  return {
-    id: product.id,
-    image: resolveProductImage(product.images[0]),
-    title: product.name,
-    weight: product.unit ?? variant?.label ?? '',
-    price: variant?.price ?? 0,
-    originalPrice: variant?.mrp ?? 0,
-    discountPercent,
-  };
-}
-
 type Props = NativeStackScreenProps<AuthStackParamList, 'Home'>;
 
 const HORIZONTAL_PADDING = 16;
 
-const STORE_NAMES = [
-  'Organic store',
-  'The Ration Shop',
-  'Spice market',
-  'Chocolate store',
-  'Munchies store',
-  'Tiffin faves',
-  'House of Flipkart',
-];
-
 export function HomeScreen({ navigation }: Props) {
-  const [activeCategory, setActiveCategory] = useState('foryou');
-  const [activeTab, setActiveTab] = useState<NavTab>('home');
+  const [activeCategory, setActiveCategory] = useState('');
   const { width: screenWidth } = useWindowDimensions();
   const { itemCount, addItem } = useCart();
   const { user } = useAuth();
-  const avatarSource = user?.avatarUrl ? { uri: `${API_ORIGIN}${user.avatarUrl}` } : defaultAvatar;
+  const { addressList } = useCheckout();
+  const avatarSource = user?.avatarUrl ? { uri: absoluteUrl(user.avatarUrl) } : defaultAvatar;
+  const defaultAddress = addressList.find((a) => a.isDefault) ?? addressList[0];
+  const locationLabel = defaultAddress
+    ? [defaultAddress.line1, defaultAddress.city].filter(Boolean).join(', ')
+    : 'Set location';
 
   const [homeData, setHomeData] = useState<RawHomeResponse | null>(null);
-  const [rawProducts, setRawProducts] = useState<RawProduct[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
   const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
 
   useFocusEffect(
@@ -103,15 +71,33 @@ export function HomeScreen({ navigation }: Props) {
     }, []),
   );
 
+  const loadHome = useCallback(
+    () =>
+      api
+        .get<RawHomeResponse>('/customer/home')
+        .then(({ data }) => setHomeData(data))
+        .catch(() => {}),
+    [],
+  );
+
   useEffect(() => {
-    api
-      .get<RawHomeResponse>('/customer/home')
-      .then(({ data }) => {
-        setHomeData(data);
-        setRawProducts([...data.topDeals, ...data.saverItems, ...data.essentialItems, ...data.snackItems, ...data.monsoonItems]);
-      })
-      .catch(() => {});
-  }, []);
+    loadHome();
+  }, [loadHome]);
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    loadHome().finally(() => setRefreshing(false));
+  };
+
+  const categories = useMemo(() => homeData?.categories ?? [], [homeData]);
+  const categoryTabs = useMemo<CategoryTab[]>(
+    () => categories.map((c) => ({ id: c.id, label: c.name, image: resolveCategoryCoverIcon(c) })),
+    [categories],
+  );
+  const storeTiles = useMemo(
+    () => categories.map((c, index) => (c.imageUrl ? { uri: absoluteUrl(c.imageUrl) } : storeCards[index % storeCards.length])),
+    [categories],
+  );
 
   const topDealItems = homeData ? homeData.topDeals.map(toProductItem) : [];
   const essentialProductItems = homeData ? homeData.essentialItems.map(toProductItem) : [];
@@ -123,39 +109,27 @@ export function HomeScreen({ navigation }: Props) {
   const paddedWidth = screenWidth - HORIZONTAL_PADDING * 2;
   const paddedHeight = (aspect: number) => paddedWidth / aspect;
   const openProduct = (item: ProductItem) => navigation.navigate('ProductDetail', { productId: item.id });
-  const openStore = (index: number) =>
-    navigation.navigate('StoreDetail', { storeId: `store-${index + 1}`, storeName: STORE_NAMES[index] });
+  const openStore = (index: number) => {
+    const category = categories[index];
+    if (category) navigation.navigate('StoreDetail', { categoryId: category.id, categoryName: category.name });
+  };
   const openCategoryLink = (link: CategoryLink) =>
     navigation.navigate('CategoryDetail', { categoryId: link.categoryId, subcategoryId: link.subcategoryId });
   const openFeaturedPick = (index: number) => openCategoryLink(featuredPickLinks[index]);
   const openEssential = (index: number) => openCategoryLink(essentialTileLinks[index]);
   const handleAddToCart = (item: ProductItem) => {
-    const variantId = rawProducts.find((p) => p.id === item.id)?.variants[0]?.id;
-    if (variantId) addItem(item.id, variantId);
+    if (item.variantId) addItem(item.id, item.variantId).catch(alertCartError);
   };
-  const handleCategoryTabChange = (tabId: string) => {
-    setActiveCategory(tabId);
-    const slug = CATEGORY_TAB_TARGETS[tabId];
-    if (slug) navigation.navigate('CategoryDetail', { categoryId: slug });
-  };
-  const handleTabChange = (tab: NavTab) => {
-    setActiveTab(tab);
-    if (tab === 'search') {
-      navigation.navigate('Search');
-    } else if (tab === 'categories') {
-      navigation.navigate('Category');
-    } else if (tab === 'orders') {
-      navigation.navigate('OrderHistory');
-    } else if (tab === 'profile') {
-      navigation.navigate('Profile');
-    }
+  const handleCategoryTabChange = (categoryId: string) => {
+    setActiveCategory(categoryId);
+    navigation.navigate('CategoryDetail', { categoryId });
   };
 
   return (
     <View style={styles.flex}>
       <StatusBar barStyle="light-content" backgroundColor="#1CA672" />
       <HomeTopBar
-        location="Koramangala 5th Block, Bengaluru"
+        location={locationLabel}
         avatarSource={avatarSource}
         hasUnreadNotifications={hasUnreadNotifications}
         onSearchPress={() => navigation.navigate('Search')}
@@ -164,8 +138,14 @@ export function HomeScreen({ navigation }: Props) {
         onAvatarPress={() => navigation.navigate('Profile')}
       />
 
-      <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
-        <CategoryTabs data={categoryTabs} activeId={activeCategory} onChange={handleCategoryTabChange} />
+      <ScrollView
+        style={styles.flex}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+      >
+        {categoryTabs.length > 0 ? (
+          <CategoryTabs data={categoryTabs} activeId={activeCategory} onChange={handleCategoryTabChange} />
+        ) : null}
 
         <ImageCardRow data={featuredPicks} cardWidth={116} cardHeight={175} onItemPress={openFeaturedPick} />
 
@@ -179,8 +159,12 @@ export function HomeScreen({ navigation }: Props) {
         <SectionHeader title="Grab it before it's gone!" />
         <ProductRow data={essentialProductItems} onItemPress={openProduct} onAddPress={handleAddToCart} />
 
-        <SectionHeader title="Shop by store" />
-        <ImageCardRow data={storeCards} cardWidth={116} cardHeight={153} onItemPress={openStore} />
+        {storeTiles.length > 0 ? (
+          <>
+            <SectionHeader title="Shop by store" />
+            <ImageCardRow data={storeTiles} cardWidth={116} cardHeight={153} onItemPress={openStore} />
+          </>
+        ) : null}
 
         <SectionHeader title="Munch on these snacks!" />
         <ProductRow data={snackProductItems} onItemPress={openProduct} onAddPress={handleAddToCart} />
@@ -246,7 +230,7 @@ export function HomeScreen({ navigation }: Props) {
         </Pressable>
       ) : null}
 
-      <BottomNavBar active={activeTab} onChange={handleTabChange} />
+      <BottomNavBar active="home" />
     </View>
   );
 }

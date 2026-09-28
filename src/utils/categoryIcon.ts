@@ -1,7 +1,7 @@
 import type { ImageSourcePropType } from 'react-native';
 import * as img from '../assets/images/category';
 import { hero as placeholderImage } from '../assets/images/product';
-import { API_ORIGIN } from '../services/api';
+import { absoluteUrl } from '../config';
 
 interface CategoryIconFamily {
   /** Substrings checked against the category's slugified name — first match wins, so
@@ -70,7 +70,7 @@ const CATEGORY_FAMILIES: Record<string, CategoryIconFamily> = {
 };
 
 function toImageUri(url: string): { uri: string } {
-  return { uri: /^https?:\/\//.test(url) ? url : `${API_ORIGIN}${url}` };
+  return { uri: absoluteUrl(url) };
 }
 
 function slugify(value: string): string {

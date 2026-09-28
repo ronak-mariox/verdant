@@ -20,61 +20,32 @@ import {
   BackChevron,
   CartBadgeEllipse,
   CartIcon,
-  ChevronBold,
   ChevronLink,
-  ClockIcon,
   HeartOutline,
   MinusIcon,
   PlusIcon,
-  ReplaceIcon,
   SearchLine,
   SeeAllArrow,
   ShareIcon,
   StarBold,
   StarIcon,
 } from '../assets/icons/product';
-import { brandIcon, seeAllThumb1, seeAllThumb2, seeAllThumb3 } from '../assets/images/product';
+import { seeAllThumb1, seeAllThumb2, seeAllThumb3 } from '../assets/images/product';
 import { ProductDetailsAccordion, type ProductHighlight } from '../components/product/ProductDetailsAccordion';
 import { SimilarProductCard } from '../components/product/SimilarProductCard';
 import { useCart } from '../context/CartContext';
 import { useCheckout } from '../context/CheckoutContext';
-import type { SimilarProduct, Variant } from '../data/product';
+import type { SimilarProduct } from '../data/product';
 import type { AuthStackParamList } from '../navigation/types';
 import { api } from '../services/api';
 import { resolveProductImage } from '../utils/productImage';
+import { alertCartError } from '../utils/cartAlerts';
+import { discountPercent as calcDiscount, primaryVariant, variantPrice } from '../utils/productMappers';
+import type { RawProduct as BaseRawProduct } from '../types/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'ProductDetail'>;
 
-interface RawVariant {
-  id: string;
-  label: string;
-  mrp: number;
-  price: number;
-  stock: number;
-  sku?: string;
-}
-
-interface RawProduct {
-  id: string;
-  vendorId: string;
-  categoryId: string;
-  subcategoryId?: string;
-  name: string;
-  description?: string;
-  brand?: string;
-  unit?: string;
-  images: string[];
-  variants: RawVariant[];
-  tags: string[];
-  taxRate: number;
-  status: string;
-  isAvailable: boolean;
-  sku?: string;
-  barcode?: string;
-  hsnCode?: string;
-  countryOfOrigin?: string;
-  rating?: RatingSummary;
-}
+type RawProduct = BaseRawProduct & { rating?: RatingSummary };
 
 interface RatingSummary {
   avg: number;
@@ -123,9 +94,10 @@ function starsFromAvg(avg: number): string {
 }
 
 function toSimilarDisplay(product: RawProduct): SimilarProduct {
-  const variant = product.variants[0];
-  const discountPercent =
-    variant && variant.mrp > 0 ? Math.round(((variant.mrp - variant.price) / variant.mrp) * 100) : 0;
+  const variant = primaryVariant(product);
+  const price = variantPrice(variant);
+  const mrp = variant?.mrp ?? 0;
+  const off = calcDiscount(price, mrp);
   const rating = product.rating;
   return {
     id: product.id,
@@ -134,12 +106,12 @@ function toSimilarDisplay(product: RawProduct): SimilarProduct {
     name: product.name,
     weight: product.unit ?? variant?.label ?? '',
     pricePerUnit: '',
-    price: variant?.price ?? 0,
-    mrp: variant?.mrp ?? 0,
-    discountLabel: discountPercent > 0 ? `${discountPercent}% OFF on MRP` : '',
+    price,
+    mrp,
+    discountLabel: off > 0 ? `${off}% OFF on MRP` : '',
     rating: rating && rating.count > 0 ? starsFromAvg(rating.avg) : '',
     reviews: rating && rating.count > 0 ? formatRatingCount(rating.count) : '',
-    deliveryTime: '10 mins',
+    offerLabel: product.activeOffer?.title,
   };
 }
 
@@ -171,7 +143,7 @@ export function ProductDetailScreen({ navigation, route }: Props) {
       .get<ProductDetailResponse>(`/customer/products/${productId}`)
       .then(({ data }) => {
         setData(data);
-        setSelectedVariantId(data.product.variants[0]?.id ?? null);
+        setSelectedVariantId(primaryVariant(data.product)?.id ?? null);
         setIsWishlisted(data.isWishlisted);
       })
       .catch(() => setLoadError(true));
@@ -206,17 +178,24 @@ export function ProductDetailScreen({ navigation, route }: Props) {
   }
 
   const { product, similar, rating, reviews } = data;
-  const variantData: Variant[] = product.variants;
+  const variantData = product.variants;
   const selectedVariant = variantData.find((v) => v.id === selectedVariantId) ?? variantData[0];
-  const discountPercent =
-    selectedVariant && selectedVariant.mrp > 0
-      ? Math.round(((selectedVariant.mrp - selectedVariant.price) / selectedVariant.mrp) * 100)
-      : 0;
-  const savings = selectedVariant ? selectedVariant.mrp - selectedVariant.price : 0;
+  const unitPrice = variantPrice(selectedVariant);
+  const unitMrp = selectedVariant?.mrp ?? 0;
+  const discountPercent = calcDiscount(unitPrice, unitMrp);
+  const savings = unitMrp > unitPrice ? Math.round((unitMrp - unitPrice) * 100) / 100 : 0;
+  const stock = product.isAvailable === false ? 0 : selectedVariant?.stock ?? 0;
+  const inCartQty = items.find((i) => i.productId === product.id && i.variantId === selectedVariant?.id)?.quantity ?? 0;
+  const maxAddable = Math.max(0, stock - inCartQty);
+  const stockText = stock <= 0 ? 'Out of stock' : stock <= 5 ? `Only ${stock} left` : 'In stock';
   const productImages: (string | undefined)[] = product.images.length > 0 ? product.images : [undefined];
   const subtitle = product.description || [product.brand, selectedVariant?.label].filter(Boolean).join(' • ');
   const similarRow1 = similar.slice(0, 3).map(toSimilarDisplay);
   const similarRow2 = similar.slice(3, 6).map(toSimilarDisplay);
+  const openSeeAll = () =>
+    product.categoryId
+      ? navigation.navigate('CategoryDetail', { categoryId: product.categoryId, subcategoryId: product.subcategoryId })
+      : navigation.navigate('Search');
   const highlights = buildHighlights(product, selectedVariant);
   const deliveryAddress = addressList.find((a) => a.id === selectedAddressId) ?? addressList[0] ?? null;
   const deliveryAddressSummary = deliveryAddress
@@ -229,13 +208,13 @@ export function ProductDetailScreen({ navigation, route }: Props) {
   };
 
   const handleAddToCart = () => {
-    if (!selectedVariant) return;
-    addItem(product.id, selectedVariant.id, quantity);
+    if (!selectedVariant || maxAddable <= 0) return;
+    addItem(product.id, selectedVariant.id, Math.min(quantity, maxAddable)).catch(alertCartError);
   };
 
   const handleShare = () => {
     Share.share({
-      message: `Check out ${product.name}${subtitle ? ` (${subtitle})` : ''} at ₹${selectedVariant?.price ?? ''} on Verdant!`,
+      message: `Check out ${product.name}${subtitle ? ` (${subtitle})` : ''} at ₹${unitPrice} on Verdant!`,
     }).catch(() => {});
   };
 
@@ -245,8 +224,8 @@ export function ProductDetailScreen({ navigation, route }: Props) {
 
   const addSimilarToCart = (id: string) => {
     const similarProduct = similar.find((p) => p.id === id);
-    const variant = similarProduct?.variants[0];
-    if (variant) addItem(id, variant.id);
+    const variant = similarProduct ? primaryVariant(similarProduct) : undefined;
+    if (variant) addItem(id, variant.id).catch(alertCartError);
   };
 
   return (
@@ -265,7 +244,7 @@ export function ProductDetailScreen({ navigation, route }: Props) {
             >
               <HeartOutline width={24} height={24} />
             </Pressable>
-            <Pressable onPress={() => navigation.navigate('Home')} hitSlop={8}>
+            <Pressable onPress={() => navigation.navigate('Search')} hitSlop={8}>
               <SearchLine width={24} height={24} />
             </Pressable>
             <Pressable onPress={handleShare} hitSlop={8}>
@@ -311,10 +290,6 @@ export function ProductDetailScreen({ navigation, route }: Props) {
         <View style={styles.body}>
           <View style={styles.infoCard}>
             <View style={styles.chipsRow}>
-              <View style={styles.deliveryBadge}>
-                <ClockIcon width={14} height={14} />
-                <Text style={styles.deliveryText}>10 mins</Text>
-              </View>
               {rating.count > 0 ? (
                 <View style={styles.ratingChip}>
                   <StarIcon width={14} height={14} />
@@ -328,14 +303,15 @@ export function ProductDetailScreen({ navigation, route }: Props) {
             {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
 
             <View style={styles.priceRow}>
-              <Text style={styles.price}>{`₹${selectedVariant?.price ?? 0}`}</Text>
-              <Text style={styles.mrp}>{`₹${selectedVariant?.mrp ?? 0}`}</Text>
+              <Text style={styles.price}>{`₹${unitPrice}`}</Text>
+              {unitMrp > unitPrice ? <Text style={styles.mrp}>{`₹${unitMrp}`}</Text> : null}
               {discountPercent > 0 ? (
                 <View style={styles.discountPill}>
                   <Text style={styles.discountPillText}>{`${discountPercent}% OFF`}</Text>
                 </View>
               ) : null}
             </View>
+            {product.activeOffer ? <Text style={styles.savings}>{product.activeOffer.title}</Text> : null}
             {savings > 0 ? <Text style={styles.savings}>{`You save ₹${savings} on this item`}</Text> : null}
 
             <Text style={styles.sectionLabel}>Choose Variant</Text>
@@ -345,12 +321,15 @@ export function ProductDetailScreen({ navigation, route }: Props) {
                 return (
                   <Pressable
                     key={variant.id}
-                    onPress={() => setSelectedVariantId(variant.id)}
+                    onPress={() => {
+                      setSelectedVariantId(variant.id);
+                      setQuantity(1);
+                    }}
                     style={[styles.variantChip, active && styles.variantChipActive]}
                   >
                     <Text style={styles.variantLabel}>{variant.label}</Text>
                     <View style={styles.variantPriceRow}>
-                      <Text style={styles.variantPrice}>{`₹${variant.price}`}</Text>
+                      <Text style={styles.variantPrice}>{`₹${variantPrice(variant)}`}</Text>
                       <Text style={styles.variantMrp}>
                         MRP <Text style={styles.variantMrpValue}>{`₹${variant.mrp}`}</Text>
                       </Text>
@@ -363,7 +342,7 @@ export function ProductDetailScreen({ navigation, route }: Props) {
             <View style={styles.quantityRow}>
               <View style={styles.quantityTextWrap}>
                 <Text style={styles.sectionLabel}>Quantity</Text>
-                <Text style={styles.stockText}>In stock • Ships from warehouse</Text>
+                <Text style={styles.stockText}>{stockText}</Text>
               </View>
               <View style={styles.stepper}>
                 <Pressable
@@ -373,7 +352,11 @@ export function ProductDetailScreen({ navigation, route }: Props) {
                   <MinusIcon width={16} height={16} />
                 </Pressable>
                 <Text style={styles.stepperValue}>{quantity}</Text>
-                <Pressable style={styles.stepperButtonDark} onPress={() => setQuantity((q) => q + 1)}>
+                <Pressable
+                  style={styles.stepperButtonDark}
+                  disabled={quantity >= maxAddable}
+                  onPress={() => setQuantity((q) => Math.min(Math.max(1, maxAddable), q + 1))}
+                >
                   <PlusIcon width={16} height={16} />
                 </Pressable>
               </View>
@@ -399,57 +382,26 @@ export function ProductDetailScreen({ navigation, route }: Props) {
             />
           ) : null}
 
-          <View style={styles.infoRow}>
-            <View style={styles.infoRowLeft}>
-              <View style={styles.brandIconWrap}>
-                <Image source={brandIcon} style={styles.brandIconImage} resizeMode="contain" />
-              </View>
-              <View>
-                <Text style={styles.infoRowTitle}>{product.brand || 'Brand'}</Text>
-                <Text style={styles.infoRowSubtitle}>Explore all products</Text>
-              </View>
-            </View>
-            <View style={styles.chevronRight}>
-              <ChevronBold width={18} height={18} />
-            </View>
-          </View>
-
-          <View style={styles.detailsTeaser}>
+          <Pressable style={styles.detailsTeaser} onPress={() => setDetailsExpanded((v) => !v)}>
             <Text style={styles.detailsTeaserTitle}>{product.name}</Text>
             <View style={styles.detailsTeaserPill}>
-              <Text style={styles.detailsTeaserPillText}>View Details</Text>
+              <Text style={styles.detailsTeaserPillText}>{detailsExpanded ? 'Hide Details' : 'View Details'}</Text>
             </View>
-          </View>
-
-          <View style={styles.infoRow}>
-            <View style={styles.infoRowLeft}>
-              <View style={styles.brandIconWrap}>
-                <ReplaceIcon width={24} height={24} />
-              </View>
-              <Text style={styles.infoRowTitle}>72 hours only replacement</Text>
-            </View>
-            <View style={styles.chevronRight}>
-              <ChevronBold width={18} height={18} />
-            </View>
-          </View>
+          </Pressable>
         </View>
 
-        <SimilarProductsBlock
-          row1={similarRow1}
-          row2={similarRow2}
-          onSeeAll={() => navigation.navigate('Home')}
-          onOpenItem={openSimilarProduct}
-          onAddItem={addSimilarToCart}
-        />
-        <SeeAllProductPill onPress={() => navigation.navigate('Home')} />
-        <SimilarProductsBlock
-          row1={similarRow1}
-          row2={similarRow2}
-          onSeeAll={() => navigation.navigate('Home')}
-          onOpenItem={openSimilarProduct}
-          onAddItem={addSimilarToCart}
-        />
-        <SeeAllProductPill onPress={() => navigation.navigate('Home')} />
+        {similarRow1.length > 0 ? (
+          <>
+            <SimilarProductsBlock
+              row1={similarRow1}
+              row2={similarRow2}
+              onSeeAll={openSeeAll}
+              onOpenItem={openSimilarProduct}
+              onAddItem={addSimilarToCart}
+            />
+            <SeeAllProductPill onPress={openSeeAll} />
+          </>
+        ) : null}
 
         <View style={styles.bottomSpacer} />
       </ScrollView>
@@ -489,15 +441,21 @@ export function ProductDetailScreen({ navigation, route }: Props) {
               <Text style={styles.stickyBadgeText}>{selectedVariant?.label ?? ''}</Text>
             </View>
             <View style={styles.stickyPriceRow}>
-              <Text style={styles.stickyPrice}>{`₹${selectedVariant?.price ?? 0}`}</Text>
+              <Text style={styles.stickyPrice}>{`₹${unitPrice}`}</Text>
               <Text style={styles.stickyMrpLabel}>
-                MRP <Text style={styles.stickyMrpValue}>{`₹${selectedVariant?.mrp ?? 0}`}</Text>
+                MRP <Text style={styles.stickyMrpValue}>{`₹${unitMrp}`}</Text>
               </Text>
             </View>
             {discountPercent > 0 ? <Text style={styles.stickyOff}>{`${discountPercent}% Off`}</Text> : null}
           </View>
-          <Pressable style={styles.addToCartButton} onPress={handleAddToCart}>
-            <Text style={styles.addToCartText}>Add to cart</Text>
+          <Pressable
+            style={[styles.addToCartButton, maxAddable <= 0 && styles.addToCartButtonDisabled]}
+            onPress={handleAddToCart}
+            disabled={maxAddable <= 0}
+          >
+            <Text style={styles.addToCartText}>
+              {stock <= 0 ? 'Out of stock' : maxAddable <= 0 ? 'Max in cart' : 'Add to cart'}
+            </Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -1114,6 +1072,9 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#1CA672',
     paddingTop: 2,
+  },
+  addToCartButtonDisabled: {
+    opacity: 0.5,
   },
   addToCartButton: {
     backgroundColor: '#1CA672',

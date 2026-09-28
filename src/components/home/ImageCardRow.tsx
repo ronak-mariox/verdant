@@ -1,8 +1,8 @@
 import React from 'react';
-import { FlatList, Image, Pressable, StyleSheet, type ImageResizeMode } from 'react-native';
+import { FlatList, Image, Pressable, StyleSheet, type ImageResizeMode, type ImageSourcePropType } from 'react-native';
 
 interface ImageCardRowProps {
-  data: number[];
+  data: ImageSourcePropType[];
   cardWidth?: number;
   cardHeight?: number;
   resizeMode?: ImageResizeMode;

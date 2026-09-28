@@ -79,7 +79,7 @@ export function AddressFormScreen({ navigation, route }: Props) {
       <CheckoutHeader title={isEdit ? 'Edit Address' : 'Add New Address'} onBack={() => navigation.goBack()} />
 
       <ScrollView style={styles.flex} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Field label="Full Name *" value={name} onChangeText={setName} placeholder="e.g. Priya Sharma" />
+        <Field label="Full Name *" value={name} onChangeText={setName} placeholder="Enter full name" />
         <Field
           label="Phone Number *"
           value={phone}

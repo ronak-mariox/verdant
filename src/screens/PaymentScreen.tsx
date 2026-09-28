@@ -7,7 +7,7 @@ import { googlepay, moreCard, paytm, phonepe, visaCard } from '../assets/images/
 import { CheckoutHeader } from '../components/checkout/CheckoutHeader';
 import { useCart } from '../context/CartContext';
 import { useCheckout } from '../context/CheckoutContext';
-import { paymentMethods, type PaymentMethodId } from '../data/checkout';
+import { AVAILABLE_PAYMENT_METHODS, paymentMethods, type PaymentMethodId } from '../data/checkout';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Payment'>;
@@ -47,11 +47,13 @@ export function PaymentScreen({ navigation }: Props) {
                 .filter((m) => m.group === group)
                 .map((method) => {
                   const selected = method.id === paymentMethod;
+                  const available = AVAILABLE_PAYMENT_METHODS.includes(method.id);
                   const visual = METHOD_VISUAL[method.id];
                   return (
                     <Pressable
                       key={method.id}
-                      style={[styles.methodCard, selected && styles.methodCardSelected]}
+                      style={[styles.methodCard, selected && styles.methodCardSelected, !available && styles.methodCardDisabled]}
+                      disabled={!available}
                       onPress={() => setPaymentMethod(method.id)}
                     >
                       <View style={styles.methodIcon}>
@@ -67,7 +69,7 @@ export function PaymentScreen({ navigation }: Props) {
                       </View>
                       <View style={styles.methodBody}>
                         <Text style={styles.methodTitle}>{method.title}</Text>
-                        <Text style={styles.methodSubtitle}>{method.subtitle}</Text>
+                        <Text style={styles.methodSubtitle}>{available ? method.subtitle : 'Coming soon'}</Text>
                       </View>
                       <View style={[styles.radio, selected && styles.radioSelected]}>
                         {selected ? <View style={styles.radioDot} /> : null}
@@ -80,8 +82,8 @@ export function PaymentScreen({ navigation }: Props) {
                   <TextInput
                     value={upiId}
                     onChangeText={setUpiId}
-                    onFocus={() => setPaymentMethod('upi-other')}
-                    placeholder="Enter other UPI ID"
+                    editable={false}
+                    placeholder="Other UPI ID — coming soon"
                     placeholderTextColor="rgba(26,26,26,0.4)"
                     style={[
                       styles.upiInput,
@@ -105,7 +107,7 @@ export function PaymentScreen({ navigation }: Props) {
       <SafeAreaView edges={['bottom']} style={styles.footerSafe}>
         <View style={styles.footer}>
           <Pressable style={styles.payButton} onPress={() => navigation.navigate('ReviewOrder')}>
-            <Text style={styles.payButtonText}>Pay ₹{amountToPay}</Text>
+            <Text style={styles.payButtonText}>Continue · ₹{amountToPay}</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -114,6 +116,9 @@ export function PaymentScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  methodCardDisabled: {
+    opacity: 0.45,
+  },
   flex: { flex: 1, backgroundColor: '#F5F5F5' },
   content: {
     padding: 16,

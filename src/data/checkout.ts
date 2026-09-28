@@ -14,24 +14,6 @@ export interface Address {
   line2: string;
 }
 
-export type DeliverySpeedId = 'express' | 'scheduled' | 'standard';
-
-export interface DeliverySpeed {
-  id: DeliverySpeedId;
-  title: string;
-  badge?: string;
-  subtitle: string;
-  price: string;
-}
-
-export const deliverySpeeds: DeliverySpeed[] = [
-  { id: 'express', title: 'Express Delivery', badge: 'Fastest', subtitle: 'Arrives in 8–12 mins', price: 'FREE' },
-  { id: 'scheduled', title: 'Scheduled', subtitle: 'Choose your time slot', price: 'FREE' },
-  { id: 'standard', title: 'Standard', badge: 'Eco', subtitle: 'Arrives in 2–4 hours', price: 'FREE' },
-];
-
-export const deliverySlots = ['Today, 2–4 PM', 'Today, 4–6 PM', 'Today, 6–8 PM', 'Tomorrow, 9–11 AM'];
-
 export const deliveryInstructionChips = ['Leave at door', 'Ring bell', 'Call on arrival', 'No plastic bag'];
 
 export type PaymentMethodId = 'gpay' | 'phonepe' | 'paytm' | 'upi-other' | 'visa' | 'add-card' | 'netbanking' | 'cod' | 'wallet';
@@ -43,13 +25,16 @@ export interface PaymentMethod {
   subtitle: string;
 }
 
+/** Only Cash on Delivery is wired to the backend; everything else is shown as "Coming soon". */
+export const AVAILABLE_PAYMENT_METHODS: PaymentMethodId[] = ['cod'];
+
 export const paymentMethods: PaymentMethod[] = [
   { id: 'gpay', group: 'UPI', title: 'Google Pay', subtitle: 'UPI' },
   { id: 'phonepe', group: 'UPI', title: 'PhonePe', subtitle: 'UPI' },
   { id: 'paytm', group: 'UPI', title: 'Paytm', subtitle: 'UPI' },
-  { id: 'visa', group: 'Cards', title: 'Visa ····4242', subtitle: 'Priya Sharma' },
+  { id: 'visa', group: 'Cards', title: 'Debit / Credit card', subtitle: 'Visa, Mastercard, RuPay' },
   { id: 'add-card', group: 'Cards', title: 'Add new card', subtitle: 'Credit / Debit' },
   { id: 'netbanking', group: 'Banking', title: 'Net Banking', subtitle: '6 banks available' },
-  { id: 'cod', group: 'More', title: 'Cash on Delivery', subtitle: '₹10 handling fee' },
+  { id: 'cod', group: 'More', title: 'Cash on Delivery', subtitle: 'Pay at your doorstep' },
   { id: 'wallet', group: 'More', title: 'Paytm Wallet', subtitle: 'Balance: ₹230' },
 ];

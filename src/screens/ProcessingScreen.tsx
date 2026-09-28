@@ -1,20 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, Easing, StatusBar, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CheckSmall, ProcessingIcon } from '../assets/icons/checkout';
 import { useCart } from '../context/CartContext';
 import { useCheckout } from '../context/CheckoutContext';
-import { api, getErrorMessage } from '../services/api';
+import { api, getErrorMessage, getErrorStatus, isNetworkOrServerError } from '../services/api';
 import type { AuthStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Processing'>;
 
-const STEPS = ['Verifying payment', 'Confirming order', 'Almost done'];
+const STEPS = ['Checking your cart', 'Confirming order', 'Almost done'];
 const STEP_INTERVAL = 700;
 const MIN_VISIBLE_MS = STEP_INTERVAL * STEPS.length;
 
 export function ProcessingScreen({ navigation }: Props) {
-  const { clearCart } = useCart();
+  const { refreshCart } = useCart();
   const { selectedAddressId, instructions } = useCheckout();
   const [activeStep, setActiveStep] = useState(0);
   const spin = useRef(new Animated.Value(0)).current;
@@ -53,11 +53,22 @@ export function ProcessingScreen({ navigation }: Props) {
           await new Promise<void>((resolve) => setTimeout(resolve, MIN_VISIBLE_MS - elapsed));
         }
         if (cancelled) return;
-        await clearCart();
+        // The backend empties the cart as part of order creation; just resync the local copy.
+        refreshCart().catch(() => {});
         navigation.reset({ index: 0, routes: [{ name: 'OrderConfirmation', params: { orderId: data.id } }] });
       } catch (err) {
         if (cancelled) return;
-        navigation.replace('PaymentFailed', { message: getErrorMessage(err, 'We could not place your order.') });
+        const message = getErrorMessage(err, 'We could not place your order.');
+        if (isNetworkOrServerError(err)) {
+          navigation.replace('PaymentFailed', { message });
+          return;
+        }
+        // 4xx means the server rejected the order as-is (empty cart, stock, address, coupon) — fix it, don't retry blindly.
+        const status = getErrorStatus(err);
+        const target = status === 404 ? 'Address' : 'Cart';
+        refreshCart().catch(() => {});
+        Alert.alert('Could not place order', message);
+        navigation.replace(target);
       }
     })();
 

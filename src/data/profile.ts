@@ -1,1 +1,1 @@
-export type NotificationKind = 'order' | 'offer' | 'delivered' | 'reorder' | 'refund' | 'security';
+export type { NotificationKind } from '../types/api';

@@ -1,28 +1,55 @@
-import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { CheckIcon, TrackIcon } from '../assets/icons/order';
-import { api } from '../services/api';
+import { LoadErrorView } from '../components/order/LoadErrorView';
+import { api, getErrorMessage } from '../services/api';
 import type { AuthStackParamList } from '../navigation/types';
+import type { RawOrder } from '../types/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'OrderCancelled'>;
 
-interface RawOrder {
-  id: string;
-  orderNumber: string;
-  pricing: { grandTotal: number };
-  paymentMethod: 'cod' | 'online';
-}
+const PAYMENT_LABELS: Record<RawOrder['paymentMethod'], string> = { cod: 'Cash on Delivery', online: 'Online payment' };
 
 export function OrderCancelledScreen({ navigation, route }: Props) {
-  const orderId = route.params?.orderId;
+  const { orderId } = route.params;
   const [order, setOrder] = useState<RawOrder | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  const load = useCallback(() => {
+    setLoaded(false);
+    setError(null);
+    api
+      .get<RawOrder>(`/customer/orders/${orderId}`)
+      .then(({ data }) => setOrder(data))
+      .catch((err) => setError(getErrorMessage(err)))
+      .finally(() => setLoaded(true));
+  }, [orderId]);
 
   useEffect(() => {
-    if (!orderId) return;
-    api.get<RawOrder>(`/customer/orders/${orderId}`).then(({ data }) => setOrder(data));
-  }, [orderId]);
+    load();
+  }, [load]);
+
+  const goHome = () => navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
+
+  if (!loaded) {
+    return (
+      <View style={styles.loadingWrap}>
+        <ActivityIndicator color="#1CA672" size="large" />
+      </View>
+    );
+  }
+
+  if (error || !order) {
+    return <LoadErrorView message={error ?? 'Order not found'} onRetry={load} onBack={goHome} />;
+  }
+
+  const wasPaid = order.paymentStatus === 'paid' || order.paymentStatus === 'refunded';
+  const amountCharged = wasPaid ? order.pricing.grandTotal : 0;
+  const paymentLabel = PAYMENT_LABELS[order.paymentMethod];
+  const refundLabel = !wasPaid ? 'None' : order.paymentStatus === 'refunded' ? 'Refunded' : `₹${order.pricing.grandTotal}`;
 
   return (
     <View style={styles.flex}>
@@ -36,15 +63,15 @@ export function OrderCancelledScreen({ navigation, route }: Props) {
               <CheckIcon width={34} height={34} />
             </View>
             <Text style={styles.heroTitle}>Order Cancelled</Text>
-            <Text style={styles.heroSubtitle}>{order?.orderNumber ?? 'Your order'}</Text>
+            <Text style={styles.heroSubtitle}>{order.orderNumber}</Text>
             <View style={styles.heroChipsRow}>
               <View style={styles.heroChip}>
                 <Text style={styles.heroChipLabel}>AMOUNT CHARGED</Text>
-                <Text style={styles.heroChipValueGreen}>₹0</Text>
+                <Text style={styles.heroChipValueGreen}>₹{amountCharged}</Text>
               </View>
               <View style={styles.heroChip}>
                 <Text style={styles.heroChipLabel}>PAYMENT</Text>
-                <Text style={styles.heroChipValue}>Cash on Delivery</Text>
+                <Text style={styles.heroChipValue}>{paymentLabel}</Text>
               </View>
             </View>
           </View>
@@ -53,24 +80,23 @@ export function OrderCancelledScreen({ navigation, route }: Props) {
         <View style={styles.body}>
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Refund details</Text>
-            <RefundRow label="Payment method" value="Cash on Delivery" />
-            <RefundRow label="Amount charged" value="₹0" />
-            <RefundRow label="Refund needed" value="None" last />
-            <View style={styles.infoBanner}>
-              <Text style={styles.infoBannerText}>
-                This order was Cash on Delivery, so no payment was ever collected — there&apos;s nothing to refund.
-              </Text>
-            </View>
+            <RefundRow label="Payment method" value={paymentLabel} />
+            <RefundRow label="Amount charged" value={`₹${amountCharged}`} />
+            <RefundRow label="Refund" value={refundLabel} last />
+            {!wasPaid ? (
+              <View style={styles.infoBanner}>
+                <Text style={styles.infoBannerText}>
+                  No payment was collected for this order, so there&apos;s nothing to refund.
+                </Text>
+              </View>
+            ) : null}
           </View>
 
-          <Pressable style={styles.trackButton} onPress={() => navigation.navigate('RefundStatus')}>
+          <Pressable style={styles.trackButton} onPress={() => navigation.replace('OrderDetails', { orderId: order.id })}>
             <TrackIcon width={16} height={16} />
-            <Text style={styles.trackButtonText}>Track Refund Status</Text>
+            <Text style={styles.trackButtonText}>View Order</Text>
           </Pressable>
-          <Pressable
-            style={styles.continueButton}
-            onPress={() => navigation.reset({ index: 0, routes: [{ name: 'Home' }] })}
-          >
+          <Pressable style={styles.continueButton} onPress={goHome}>
             <Text style={styles.continueButtonText}>Continue Shopping</Text>
           </Pressable>
           <Pressable style={styles.supportLinkWrap} onPress={() => navigation.navigate('SupportHome')}>
@@ -115,6 +141,12 @@ const refundRowStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
+  loadingWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F5F5F5',
+  },
   flex: { flex: 1, backgroundColor: '#F5F5F5' },
   heroSafe: {
     backgroundColor: '#1E293B',

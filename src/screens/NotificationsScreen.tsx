@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -12,22 +12,12 @@ import {
   NotifRefundIcon,
   NotifSecurityIcon,
 } from '../assets/icons/profile';
-import type { NotificationKind } from '../data/profile';
+import { getNotificationOrderId, unwrapList, type NotificationKind, type PagedResponse, type RawNotification } from '../types/api';
 import type { AuthStackParamList } from '../navigation/types';
 import { api } from '../services/api';
 import { formatRelativeTime } from '../utils/relativeTime';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Notifications'>;
-
-interface RawNotification {
-  id: string;
-  kind: NotificationKind;
-  title: string;
-  body: string;
-  orderId?: string;
-  isRead: boolean;
-  createdAt: string;
-}
 
 const KIND_BG: Record<NotificationKind, string> = {
   order: '#EFF6FF',
@@ -40,11 +30,11 @@ const KIND_BG: Record<NotificationKind, string> = {
 
 const ACTION_LABEL: Record<NotificationKind, string> = {
   order: 'Track →',
-  offer: 'Shop →',
+  offer: '',
   delivered: 'Rate →',
   reorder: 'Reorder →',
   refund: '',
-  security: 'Review →',
+  security: '',
 };
 
 function KindIcon({ kind }: { kind: NotificationKind }) {
@@ -70,16 +60,28 @@ export function NotificationsScreen({ navigation }: Props) {
   const [items, setItems] = useState<RawNotification[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [tab, setTab] = useState<'all' | 'unread'>('all');
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(
+    () =>
+      api
+        .get<RawNotification[] | PagedResponse<RawNotification>>('/customer/notifications')
+        .then(({ data }) => setItems(unwrapList(data)))
+        .catch(() => {})
+        .finally(() => setIsLoading(false)),
+    [],
+  );
 
   useFocusEffect(
     useCallback(() => {
-      api
-        .get<RawNotification[]>('/customer/notifications')
-        .then(({ data }) => setItems(data))
-        .catch(() => {})
-        .finally(() => setIsLoading(false));
-    }, []),
+      load();
+    }, [load]),
   );
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    load().finally(() => setRefreshing(false));
+  };
 
   const unreadCount = useMemo(() => items.filter((n) => !n.isRead).length, [items]);
   const visible = tab === 'unread' ? items.filter((n) => !n.isRead) : items;
@@ -122,7 +124,11 @@ export function NotificationsScreen({ navigation }: Props) {
         </View>
       </SafeAreaView>
 
-      <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.flex}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+      >
         <View style={styles.body}>
           {isLoading ? (
             <View style={styles.emptyWrap}>
@@ -153,7 +159,7 @@ export function NotificationsScreen({ navigation }: Props) {
                   </Text>
                   <View style={styles.footerRow}>
                     <Text style={styles.time}>{formatRelativeTime(notification.createdAt)}</Text>
-                    {ACTION_LABEL[notification.kind] ? (
+                    {ACTION_LABEL[notification.kind] && (notification.kind === 'offer' || getNotificationOrderId(notification)) ? (
                       <Text style={styles.action}>{ACTION_LABEL[notification.kind]}</Text>
                     ) : null}
                   </View>

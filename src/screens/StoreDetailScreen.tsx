@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
-  Image,
+  FlatList,
   Pressable,
-  ScrollView,
+  RefreshControl,
   StatusBar,
   StyleSheet,
   Text,
@@ -12,47 +13,85 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { BackWhiteIcon, CartIcon, SearchIcon, ViewAllArrowIcon } from '../assets/icons/store';
-import { bannerDailyStaples, bannerKitchen } from '../assets/images/store';
-import { StoreProductRow } from '../components/store/StoreProductRow';
+import { BackWhiteIcon, CartIcon, SearchIcon } from '../assets/icons/store';
+import { LoadErrorView } from '../components/order/LoadErrorView';
+import { StoreProductCard } from '../components/store/StoreProductCard';
 import { useCart } from '../context/CartContext';
-import {
-  bigPackSavings,
-  brandLogos,
-  crossSellTiles,
-  dalThumbs,
-  giftPackings,
-  graviesPurees,
-  kitchenTiles,
-  littleKirana,
-  papadPickles,
-  type StoreProduct,
-} from '../data/store';
+import type { StoreProduct } from '../data/store';
 import type { AuthStackParamList } from '../navigation/types';
+import { api, getErrorMessage } from '../services/api';
+import { toStoreProduct } from '../utils/productMappers';
+import type { PagedResponse, RawProduct } from '../types/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'StoreDetail'>;
 
+const PAGE_SIZE = 20;
+
 export function StoreDetailScreen({ navigation, route }: Props) {
+  const { categoryId, categoryName } = route.params;
   const { width: screenWidth } = useWindowDimensions();
   const { addItem, itemCount } = useCart();
-  const storeName = route.params?.storeName ?? 'The Little Kirana';
+  const cardWidth = (screenWidth - 16 * 2 - 12) / 2;
 
-  const kitchenBannerHeight = (screenWidth * 311) / 800;
-  const dailyStaplesHeight = (screenWidth * 177) / 800;
-  const tileWidth = (screenWidth - 16 * 2 - 8 * 2) / 3;
+  const [products, setProducts] = useState<StoreProduct[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const openProduct = (item: StoreProduct) => {
-    navigation.navigate('ProductDetail', { productId: item.id });
-  };
+  const fetchPage = useCallback(
+    async (nextPage: number) => {
+      const { data } = await api.get<PagedResponse<RawProduct>>('/customer/products', {
+        params: { categoryId, page: nextPage, limit: PAGE_SIZE },
+      });
+      return data;
+    },
+    [categoryId],
+  );
+
+  const loadFirst = useCallback(async () => {
+    const data = await fetchPage(1);
+    setProducts(data.items.map(toStoreProduct));
+    setTotal(data.total ?? data.items.length);
+    setTotalPages(data.totalPages ?? 1);
+    setPage(1);
+    setError(null);
+  }, [fetchPage]);
+
+  useEffect(() => {
+    setLoading(true);
+    loadFirst()
+      .catch((err) => setError(getErrorMessage(err)))
+      .finally(() => setLoading(false));
+  }, [loadFirst]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadFirst()
+      .catch((err) => setError(getErrorMessage(err)))
+      .finally(() => setRefreshing(false));
+  }, [loadFirst]);
+
+  const loadMore = useCallback(() => {
+    if (loadingMore || loading || page >= totalPages) return;
+    setLoadingMore(true);
+    fetchPage(page + 1)
+      .then((data) => {
+        setProducts((prev) => [...prev, ...data.items.map(toStoreProduct)]);
+        setPage(page + 1);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingMore(false));
+  }, [fetchPage, loading, loadingMore, page, totalPages]);
+
+  const openProduct = (item: StoreProduct) => navigation.navigate('ProductDetail', { productId: item.id });
 
   const addToCart = (item: StoreProduct) => {
-    // This store's catalog (giftPackings, bigPackSavings, etc.) is still static mock data —
-    // there is no per-vendor storefront endpoint yet and no real vendorId flows into this
-    // screen from navigation (see HomeScreen's "Shop by store" tiles), so these ids don't
-    // correspond to real backend products/variants. Fire the real cart call anyway so the
-    // signature matches the new backend-backed addItem, and swallow the inevitable failure
-    // quietly rather than leaving an unhandled promise rejection.
-    addItem(item.id, item.id).catch(() => {});
+    if (!item.variantId) return;
+    addItem(item.id, item.variantId).catch((err) => Alert.alert('Could not add to cart', getErrorMessage(err)));
   };
 
   return (
@@ -63,7 +102,7 @@ export function StoreDetailScreen({ navigation, route }: Props) {
           <Pressable style={styles.backButton} onPress={() => navigation.goBack()} hitSlop={8}>
             <BackWhiteIcon width={20} height={20} />
           </Pressable>
-          <Pressable style={styles.searchBar} onPress={() => navigation.navigate('Home')}>
+          <Pressable style={styles.searchBar} onPress={() => navigation.navigate('Search')}>
             <SearchIcon width={18} height={18} />
             <Text style={styles.searchPlaceholder} numberOfLines={1}>
               Search atta, dal & more
@@ -72,117 +111,59 @@ export function StoreDetailScreen({ navigation, route }: Props) {
           <Pressable style={styles.cartButton} onPress={() => navigation.navigate('Cart')}>
             <View style={styles.cartIconWrap}>
               <CartIcon width={22} height={22} />
-              <View style={styles.cartBadge}>
-                <Text style={styles.cartBadgeText}>{itemCount > 0 ? itemCount : 1}</Text>
-              </View>
+              {itemCount > 0 ? (
+                <View style={styles.cartBadge}>
+                  <Text style={styles.cartBadgeText}>{itemCount}</Text>
+                </View>
+              ) : null}
             </View>
             <Text style={styles.cartLabel}>Cart</Text>
           </Pressable>
         </View>
       </SafeAreaView>
 
-      <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
-        <Text style={styles.storeNameLabel}>{storeName}</Text>
-
-        <Pressable onPress={() => navigation.navigate('Home')}>
-          <Image source={bannerKitchen} style={{ width: screenWidth, height: kitchenBannerHeight }} resizeMode="cover" />
-        </Pressable>
-
-        <View style={styles.kitchenGrid}>
-          {kitchenTiles.map((tile) => (
-            <Pressable
-              key={tile.id}
-              style={[styles.kitchenTile, { width: tileWidth }]}
-              onPress={() => navigation.navigate('Home')}
-            >
-              <Image
-                source={tile.image}
-                style={[styles.kitchenTileImage, { width: tileWidth, height: tileWidth }]}
-                resizeMode="cover"
-              />
-            </Pressable>
-          ))}
+      {loading ? (
+        <View style={styles.centerWrap}>
+          <ActivityIndicator color="#1CA672" size="large" />
         </View>
-
-        <SectionHeader title="Gift Packings" onSeeAll={() => Alert.alert('Gift Packings', 'Browsing all gift packing deals.')} />
-        <StoreProductRow data={giftPackings} onItemPress={openProduct} onAddItem={addToCart} />
-
-        <SectionHeader title="Big Pack Big Savings" onSeeAll={() => Alert.alert('Big Pack Big Savings', 'Browsing all bulk-pack deals.')} />
-        <StoreProductRow data={bigPackSavings} onItemPress={openProduct} onAddItem={addToCart} />
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dalRow}>
-          {dalThumbs.map((dal) => (
-            <Pressable key={dal.id} style={styles.dalItem} onPress={() => navigation.navigate('Home')}>
-              <Image source={dal.image} style={styles.dalImage} resizeMode="cover" />
-              <Text style={styles.dalLabel} numberOfLines={1}>
-                {dal.label}
+      ) : error && products.length === 0 ? (
+        <LoadErrorView message={error} onRetry={onRefresh} onBack={() => navigation.goBack()} />
+      ) : (
+        <FlatList
+          data={products}
+          keyExtractor={(item) => item.id}
+          numColumns={2}
+          columnWrapperStyle={styles.columnWrapper}
+          contentContainerStyle={styles.listContent}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#1CA672" />}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.4}
+          ListHeaderComponent={
+            <View style={styles.titleWrap}>
+              <Text style={styles.title}>{categoryName ?? 'Store'}</Text>
+              <Text style={styles.subtitle}>
+                {total} {total === 1 ? 'product' : 'products'}
               </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-
-        <SectionHeader title="The Little Kirana" onSeeAll={() => Alert.alert('The Little Kirana', 'Browsing all Little Kirana essentials.')} />
-        <StoreProductRow data={littleKirana} onItemPress={openProduct} onAddItem={addToCart} />
-
-        <SectionHeader title="Papad & Pickles" onSeeAll={() => Alert.alert('Papad & Pickles', 'Browsing all papad & pickle deals.')} />
-        <StoreProductRow data={papadPickles} onItemPress={openProduct} onAddItem={addToCart} />
-
-        <View style={styles.brandGrid}>
-          {brandLogos.map((brand) => (
-            <Pressable
-              key={brand.id}
-              style={[styles.brandTile, { width: tileWidth }]}
-              onPress={() => navigation.navigate('Home')}
-            >
-              <Image
-                source={brand.image}
-                style={[styles.brandTileImage, { width: tileWidth, height: tileWidth }]}
-                resizeMode="cover"
-              />
-            </Pressable>
-          ))}
-        </View>
-
-        <SectionHeader title="Gravies & Purees" onSeeAll={() => Alert.alert('Gravies & Purees', 'Browsing all gravies & purees.')} />
-        <StoreProductRow data={graviesPurees} onItemPress={openProduct} onAddItem={addToCart} />
-
-        <View style={styles.moreSection}>
-          <Text style={styles.moreTitle}>Looking for more?</Text>
-          <Text style={styles.moreSubtitle}>See our other stores</Text>
-          <View style={styles.crossSellRow}>
-            {crossSellTiles.map((tile) => (
-              <Pressable
-                key={tile.id}
-                style={styles.crossSellTile}
-                onPress={() => navigation.push('StoreDetail', { storeId: tile.id, storeName: tile.label })}
-              >
-                <Image source={tile.image} style={styles.crossSellImage} resizeMode="cover" />
-              </Pressable>
-            ))}
-          </View>
-        </View>
-
-        <Pressable onPress={() => navigation.navigate('Home')}>
-          <Image
-            source={bannerDailyStaples}
-            style={{ width: screenWidth, height: dailyStaplesHeight }}
-            resizeMode="cover"
-          />
-        </Pressable>
-
-        <View style={styles.bottomSpacer} />
-      </ScrollView>
-    </View>
-  );
-}
-
-function SectionHeader({ title, onSeeAll }: { title: string; onSeeAll: () => void }) {
-  return (
-    <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <Pressable style={styles.viewAllButton} onPress={onSeeAll} hitSlop={6}>
-        <ViewAllArrowIcon width={16} height={16} />
-      </Pressable>
+            </View>
+          }
+          ListEmptyComponent={
+            <View style={styles.centerWrap}>
+              <Text style={styles.emptyTitle}>Nothing here yet</Text>
+              <Text style={styles.emptySubtitle}>Products in this category will show up as vendors add them.</Text>
+            </View>
+          }
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.footerLoader}>
+                <ActivityIndicator color="#1CA672" />
+              </View>
+            ) : null
+          }
+          renderItem={({ item }) => (
+            <StoreProductCard item={item} cardWidth={cardWidth} onPress={() => openProduct(item)} onAdd={() => addToCart(item)} />
+          )}
+        />
+      )}
     </View>
   );
 }
@@ -252,116 +233,45 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     paddingTop: 2,
   },
-  storeNameLabel: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#1A1A1A',
+  listContent: {
     paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 4,
+    paddingBottom: 32,
   },
-  kitchenGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-  },
-  kitchenTile: {
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  kitchenTileImage: {
-    borderRadius: 12,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  columnWrapper: {
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 20,
+    marginBottom: 12,
   },
-  sectionTitle: {
-    fontSize: 17,
+  titleWrap: {
+    paddingVertical: 14,
+  },
+  title: {
+    fontSize: 20,
     fontWeight: '800',
     color: '#1A1A1A',
   },
-  viewAllButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 999,
-    backgroundColor: '#1F1F1F',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dalRow: {
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    gap: 14,
-  },
-  dalItem: {
-    alignItems: 'center',
-    width: 64,
-  },
-  dalImage: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#F5F5F5',
-  },
-  dalLabel: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#374151',
-    paddingTop: 6,
-    textAlign: 'center',
-  },
-  brandGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  brandTile: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#F0F0F0',
-  },
-  brandTileImage: {
-    borderRadius: 12,
-  },
-  moreSection: {
-    paddingHorizontal: 16,
-    paddingTop: 24,
-  },
-  moreTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: '#1A1A1A',
-  },
-  moreSubtitle: {
+  subtitle: {
     fontSize: 12,
-    color: '#9CA3AF',
+    color: '#6B7280',
     paddingTop: 2,
   },
-  crossSellRow: {
-    flexDirection: 'row',
-    gap: 12,
-    paddingTop: 14,
-  },
-  crossSellTile: {
+  centerWrap: {
     flex: 1,
-    aspectRatio: 1,
-    borderRadius: 16,
-    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
   },
-  crossSellImage: {
-    width: '100%',
-    height: '100%',
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1A1A1A',
   },
-  bottomSpacer: {
-    height: 24,
+  emptySubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    textAlign: 'center',
+    paddingTop: 6,
+  },
+  footerLoader: {
+    paddingVertical: 16,
   },
 });

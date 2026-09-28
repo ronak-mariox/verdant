@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Image,
   Pressable,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -15,17 +16,19 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   BackIcon,
   CouponTag,
-  DeliveryClock,
   HeartSave,
   MinusIcon,
   PlusIcon,
   TrashIcon,
 } from '../assets/icons/cart';
-import { useCart, type CartItem } from '../context/CartContext';
-import { couponSuggestions, MIN_ORDER_VALUE } from '../data/cart';
+import { BillRow } from '../components/order/BillRow';
+import { useCart, type CartItem, type UnavailableCartLine } from '../context/CartContext';
+import { MIN_ORDER_VALUE } from '../data/cart';
 import { api, getErrorMessage } from '../services/api';
 import { resolveProductImage } from '../utils/productImage';
+import { primaryVariant, variantPrice } from '../utils/productMappers';
 import type { AuthStackParamList } from '../navigation/types';
+import { summarizeLines, type PagedResponse, type RawProduct } from '../types/api';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Cart'>;
 
@@ -43,6 +46,8 @@ interface RecommendedProduct {
 const REC_BG_COLORS = ['#EFF6FF', '#FEFCE8', '#FDF4FF', '#F0FDF4', '#FFF7ED'];
 
 export function CartScreen({ navigation }: Props) {
+  const scrollRef = useRef<ScrollView>(null);
+  const billOffsetY = useRef(0);
   const {
     items,
     itemCount,
@@ -53,50 +58,52 @@ export function CartScreen({ navigation }: Props) {
     pricing,
     couponCode,
     couponMessage,
+    unavailable,
     applyCoupon: applyCouponToCart,
     removeCoupon,
+    refreshCart,
   } = useCart();
   const [coupon, setCoupon] = useState('');
   const [removingCoupon, setRemovingCoupon] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [recommended, setRecommended] = useState<RecommendedProduct[]>([]);
 
   useEffect(() => {
     api
-      .get<{ items: { id: string; name: string; images: string[]; variants: { id: string; price: number; mrp: number }[] }[] }>(
-        '/customer/products',
-        { params: { limit: 6, sort: 'newest' } },
-      )
+      .get<PagedResponse<RawProduct>>('/customer/products', { params: { limit: 6, sort: 'newest' } })
       .then(({ data }) => {
         setRecommended(
           data.items
-            .filter((p) => p.variants.length > 0)
             .map((p, index) => {
-              const variant = p.variants[0];
-              const discountPct = variant.mrp > 0 ? Math.round(((variant.mrp - variant.price) / variant.mrp) * 100) : 0;
+              const variant = primaryVariant(p);
+              if (!variant || variant.stock <= 0) return null;
+              const price = variantPrice(variant);
+              const discountPct = variant.mrp > 0 && variant.mrp > price ? Math.round(((variant.mrp - price) / variant.mrp) * 100) : 0;
               return {
                 id: p.id,
                 variantId: variant.id,
                 image: resolveProductImage(p.images[0]),
                 name: p.name,
-                price: variant.price,
+                price,
                 mrp: variant.mrp,
                 discountLabel: `${discountPct}%`,
                 bgColor: REC_BG_COLORS[index % REC_BG_COLORS.length],
               };
-            }),
+            })
+            .filter((p): p is RecommendedProduct => p !== null),
         );
       })
       .catch(() => {});
   }, []);
 
-  const itemTotal = useMemo(
-    () => items.reduce((sum, i) => sum + (i.mrp ?? i.price) * i.quantity, 0),
-    [items],
-  );
-  const productDiscount = useMemo(
-    () => items.reduce((sum, i) => sum + ((i.mrp ?? i.price) - i.price) * i.quantity, 0),
-    [items],
-  );
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    refreshCart()
+      .catch((err) => Alert.alert('Could not refresh cart', getErrorMessage(err)))
+      .finally(() => setRefreshing(false));
+  }, [refreshCart]);
+
+  const { itemTotal, offerDiscount } = useMemo(() => summarizeLines(items), [items]);
   const deliveryFee = pricing?.deliveryFee ?? 0;
   const platformFee = pricing?.platformFee ?? 0;
   const taxTotal = pricing?.taxTotal ?? 0;
@@ -128,9 +135,20 @@ export function CartScreen({ navigation }: Props) {
     }
   };
 
-  const saveForLater = (item: CartItem) => {
-    removeItem(item.id).catch(() => {});
-    Alert.alert('Saved for later', `${item.title} was moved out of your cart.`);
+  const saveForLater = async (item: CartItem) => {
+    try {
+      const { data } = await api.post<{ isWishlisted: boolean }>(`/customer/wishlist/${item.productId}/toggle`);
+      // Toggle un-saves an already-saved product; flip it back so "save" is never a remove.
+      if (!data.isWishlisted) await api.post(`/customer/wishlist/${item.productId}/toggle`);
+      await removeItem(item.id);
+      Alert.alert('Saved for later', `${item.title} was moved to your saved items.`);
+    } catch (err) {
+      Alert.alert('Could not save item', getErrorMessage(err));
+    }
+  };
+
+  const handleCartAction = (action: Promise<void>) => {
+    action.catch((err) => Alert.alert('Could not update cart', getErrorMessage(err)));
   };
 
   return (
@@ -145,28 +163,32 @@ export function CartScreen({ navigation }: Props) {
             <View style={styles.headerTitleRow}>
               <View>
                 <Text style={styles.headerTitle}>My Cart</Text>
-                <Text style={styles.headerSubtitle}>{itemCount} items</Text>
-              </View>
-              <View style={styles.deliveryBadge}>
-                <View style={styles.deliveryDot}>
-                  <DeliveryClock width={10} height={10} />
-                </View>
-                <Text style={styles.deliveryBadgeText}>9 min delivery</Text>
+                <Text style={styles.headerSubtitle}>
+                  {itemCount} {itemCount === 1 ? 'item' : 'items'}
+                </Text>
               </View>
             </View>
           </View>
         </View>
       </SafeAreaView>
 
-      {items.length === 0 ? (
-        <View style={styles.emptyWrap}>
+      {items.length === 0 && unavailable.length === 0 ? (
+        <ScrollView
+          contentContainerStyle={styles.emptyWrap}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#1CA672" />}
+        >
           <Text style={styles.emptyTitle}>Your cart is empty</Text>
           <Pressable style={styles.emptyButton} onPress={() => navigation.navigate('Home')}>
             <Text style={styles.emptyButtonText}>Browse items</Text>
           </Pressable>
-        </View>
+        </ScrollView>
       ) : (
-        <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          ref={scrollRef}
+          style={styles.flex}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#1CA672" />}
+        >
           {amountNeeded > 0 ? (
             <View style={styles.minOrderWrap}>
               <View style={styles.minOrderCard}>
@@ -192,13 +214,20 @@ export function CartScreen({ navigation }: Props) {
           ) : null}
 
           <View style={styles.itemsWrap}>
+            {unavailable.map((line) => (
+              <UnavailableLineCard
+                key={`${line.productId}::${line.variantId}`}
+                line={line}
+                onRemove={() => handleCartAction(removeItem(`${line.productId}::${line.variantId}`))}
+              />
+            ))}
             {items.map((item) => (
               <CartItemCard
                 key={item.id}
                 item={item}
-                onIncrement={() => increment(item.id)}
-                onDecrement={() => decrement(item.id)}
-                onRemove={() => removeItem(item.id)}
+                onIncrement={() => handleCartAction(increment(item.id))}
+                onDecrement={() => handleCartAction(decrement(item.id))}
+                onRemove={() => handleCartAction(removeItem(item.id))}
                 onSave={() => saveForLater(item)}
               />
             ))}
@@ -227,13 +256,6 @@ export function CartScreen({ navigation }: Props) {
                   Apply
                 </Text>
               </Pressable>
-            </View>
-            <View style={styles.couponChipsRow}>
-              {couponSuggestions.map((code) => (
-                <Pressable key={code} style={styles.couponChip} onPress={() => setCoupon(code)}>
-                  <Text style={styles.couponChipText}>{code}</Text>
-                </Pressable>
-              ))}
             </View>
             {couponCode ? (
               <View style={styles.couponAppliedRow}>
@@ -279,7 +301,10 @@ export function CartScreen({ navigation }: Props) {
                       <Text style={styles.recPrice}>₹{p.price}</Text>
                       <Text style={styles.recMrp}>₹{p.mrp}</Text>
                     </View>
-                    <Pressable style={styles.recAddButton} onPress={() => addItem(p.id, p.variantId).catch(() => {})}>
+                    <Pressable
+                      style={styles.recAddButton}
+                      onPress={() => addItem(p.id, p.variantId).catch((err) => Alert.alert('Could not add to cart', getErrorMessage(err)))}
+                    >
                       <Text style={styles.recAddText}>ADD</Text>
                     </Pressable>
                   </View>
@@ -290,22 +315,27 @@ export function CartScreen({ navigation }: Props) {
 
           <View style={styles.divider} />
 
-          <View style={styles.billSection}>
+          <View
+            style={styles.billSection}
+            onLayout={(event) => {
+              billOffsetY.current = event.nativeEvent.layout.y;
+            }}
+          >
             <Text style={styles.billTitle}>Bill Details</Text>
-            <BillRow label="Item total (MRP)" value={`₹${itemTotal}`} />
-            <BillRow label="Product discount" value={`−₹${productDiscount}`} valueColor="#1CA672" />
-            {couponCode ? (
+            <BillRow label="Item total" value={`₹${itemTotal}`} />
+            {offerDiscount > 0 ? <BillRow label="Offer discount" value={`−₹${offerDiscount}`} valueColor="#1CA672" /> : null}
+            {couponCode && couponDiscount > 0 ? (
               <BillRow label={`Coupon (${couponCode})`} value={`−₹${couponDiscount}`} valueColor="#1CA672" />
             ) : null}
             {taxTotal > 0 ? <BillRow label="Taxes" value={`₹${taxTotal}`} labelColor="#9CA3AF" /> : null}
             <BillRow label="Delivery fee" value={deliveryFee > 0 ? `₹${deliveryFee}` : 'FREE'} labelColor="#9CA3AF" />
-            <BillRow label="Platform fee" value={`₹${platformFee}`} labelColor="#9CA3AF" />
+            {platformFee > 0 ? <BillRow label="Platform fee" value={`₹${platformFee}`} labelColor="#9CA3AF" /> : null}
             <View style={styles.billDividerLine} />
             <BillRow label="To Pay" value={`₹${toPay}`} bold />
-            {productDiscount > 0 ? (
+            {offerDiscount + couponDiscount > 0 ? (
               <View style={styles.savingsBanner}>
                 <Text style={styles.savingsEmoji}>🎉</Text>
-                <Text style={styles.savingsText}>You save ₹{productDiscount} on this order!</Text>
+                <Text style={styles.savingsText}>You save ₹{offerDiscount + couponDiscount} on this order!</Text>
               </View>
             ) : null}
           </View>
@@ -315,8 +345,8 @@ export function CartScreen({ navigation }: Props) {
           <View style={styles.policySection}>
             <Text style={styles.policyText}>
               <Text style={styles.policyBold}>Cancellation Policy: </Text>
-              Orders can be cancelled within 60 seconds of placing. A 100% refund will be issued for
-              cancellations. We may not accept cancellations if the order is already being packed.
+              Orders can be cancelled until the store starts preparing them. Cash on Delivery orders are never
+              charged, so there is nothing to refund.
             </Text>
           </View>
 
@@ -324,16 +354,22 @@ export function CartScreen({ navigation }: Props) {
         </ScrollView>
       )}
 
-      {items.length > 0 ? (
+      {items.length > 0 || unavailable.length > 0 ? (
         <SafeAreaView edges={['bottom']} style={styles.footerSafe}>
           <View style={styles.footer}>
             <View>
               <Text style={styles.footerAmount}>₹{toPay}</Text>
-              <Text style={styles.footerLink}>View price details</Text>
+              <Pressable
+                accessibilityRole="button"
+                hitSlop={8}
+                onPress={() => scrollRef.current?.scrollTo({ y: billOffsetY.current, animated: true })}
+              >
+                <Text style={styles.footerLink}>View price details</Text>
+              </Pressable>
             </View>
             <Pressable
-              style={[styles.placeOrderButton, amountNeeded > 0 && styles.placeOrderDisabled]}
-              disabled={amountNeeded > 0}
+              style={[styles.placeOrderButton, (amountNeeded > 0 || items.length === 0) && styles.placeOrderDisabled]}
+              disabled={amountNeeded > 0 || items.length === 0}
               onPress={() => navigation.navigate('Address')}
             >
               <Text style={styles.placeOrderText}>Place order</Text>
@@ -345,57 +381,6 @@ export function CartScreen({ navigation }: Props) {
   );
 }
 
-function BillRow({
-  label,
-  value,
-  labelColor,
-  valueColor,
-  bold,
-}: {
-  label: string;
-  value: string;
-  labelColor?: string;
-  valueColor?: string;
-  bold?: boolean;
-}) {
-  return (
-    <View style={billRowStyles.row}>
-      <Text style={[billRowStyles.label, labelColor ? { color: labelColor } : null, bold && billRowStyles.bold]}>
-        {label}
-      </Text>
-      <Text style={[billRowStyles.value, valueColor ? { color: valueColor } : null, bold && billRowStyles.boldValue]}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-const billRowStyles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F8F8F8',
-  },
-  label: {
-    fontSize: 13,
-    color: '#374151',
-  },
-  value: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#374151',
-  },
-  bold: {
-    fontWeight: '700',
-  },
-  boldValue: {
-    fontWeight: '800',
-    color: '#1A1A1A',
-  },
-});
 
 function CartItemCard({
   item,
@@ -410,6 +395,7 @@ function CartItemCard({
   onRemove: () => void;
   onSave: () => void;
 }) {
+  const canIncrement = item.quantity < item.maxStock;
   return (
     <View style={styles.itemCard}>
       <View style={styles.itemTopRow}>
@@ -426,6 +412,7 @@ function CartItemCard({
             </Pressable>
           </View>
           {item.subtitle ? <Text style={styles.itemSubtitle}>{item.subtitle}</Text> : null}
+          {!canIncrement ? <Text style={styles.stockHint}>Only {item.maxStock} available</Text> : null}
         </View>
       </View>
       <View style={styles.itemBottomRow}>
@@ -435,7 +422,12 @@ function CartItemCard({
               <MinusIcon width={14} height={14} />
             </Pressable>
             <Text style={styles.stepperValue}>{item.quantity}</Text>
-            <Pressable style={styles.stepperButton} onPress={onIncrement} hitSlop={4}>
+            <Pressable
+              style={[styles.stepperButton, !canIncrement && styles.stepperButtonDisabled]}
+              onPress={onIncrement}
+              disabled={!canIncrement}
+              hitSlop={4}
+            >
               <PlusIcon width={14} height={14} />
             </Pressable>
           </View>
@@ -445,17 +437,54 @@ function CartItemCard({
           </Pressable>
         </View>
         <View style={styles.itemPriceWrap}>
-          <Text style={styles.itemPrice}>₹{item.price * item.quantity}</Text>
-          {item.mrp && item.mrp > item.price ? (
-            <Text style={styles.itemMrp}>₹{item.mrp * item.quantity}</Text>
-          ) : null}
+          <Text style={styles.itemPrice}>₹{item.subtotal}</Text>
+          {item.originalSubtotal > item.subtotal ? <Text style={styles.itemMrp}>₹{item.originalSubtotal}</Text> : null}
         </View>
       </View>
     </View>
   );
 }
 
+function UnavailableLineCard({ line, onRemove }: { line: UnavailableCartLine; onRemove: () => void }) {
+  return (
+    <View style={[styles.itemCard, styles.unavailableCard]}>
+      <View style={styles.itemInfoTop}>
+        <View style={styles.itemInfo}>
+          <Text style={styles.unavailableTitle}>Item unavailable</Text>
+          <Text style={styles.unavailableReason}>{line.reason}</Text>
+        </View>
+        <Pressable style={styles.itemRemoveButton} onPress={onRemove} hitSlop={6}>
+          <TrashIcon width={13} height={13} />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  stepperButtonDisabled: {
+    opacity: 0.35,
+  },
+  stockHint: {
+    fontSize: 11,
+    color: '#DC2626',
+    paddingTop: 2,
+  },
+  unavailableCard: {
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    backgroundColor: '#FEF2F2',
+  },
+  unavailableTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#B91C1C',
+  },
+  unavailableReason: {
+    fontSize: 12,
+    color: '#7F1D1D',
+    paddingTop: 2,
+  },
   flex: { flex: 1, backgroundColor: '#F5F5F5' },
   headerSafe: { backgroundColor: '#FFFFFF' },
   headerRow: {
@@ -492,28 +521,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#9CA3AF',
     paddingTop: 1,
-  },
-  deliveryBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#F0FDF4',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  deliveryDot: {
-    width: 18,
-    height: 18,
-    borderRadius: 999,
-    backgroundColor: '#1CA672',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  deliveryBadgeText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#1CA672',
   },
   emptyWrap: {
     flex: 1,
@@ -763,25 +770,6 @@ const styles = StyleSheet.create({
   },
   couponApplyTextActive: {
     color: '#FFFFFF',
-  },
-  couponChipsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingTop: 12,
-  },
-  couponChip: {
-    backgroundColor: '#F0FDF4',
-    borderWidth: 1.5,
-    borderColor: '#BBF7D0',
-    borderStyle: 'dashed',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  couponChipText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#1CA672',
   },
   couponAppliedRow: {
     flexDirection: 'row',

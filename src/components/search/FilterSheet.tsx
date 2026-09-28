@@ -3,18 +3,13 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { CheckmarkWhiteIcon } from '../../assets/icons/searchscreen';
 import { Toggle } from '../Toggle';
 import { colors, radius, spacing, typography } from '../../theme';
-import {
-  DEFAULT_FILTERS,
-  FILTER_BRANDS,
-  MIN_DISCOUNT_OPTIONS,
-  PRICE_RANGES,
-  RESULT_CATEGORY_CHIPS,
-  type FilterState,
-} from '../../data/search';
+import { DEFAULT_FILTERS, MIN_DISCOUNT_OPTIONS, PRICE_RANGES, type FilterState } from '../../data/search';
 
 interface FilterSheetProps {
   visible: boolean;
   filters: FilterState;
+  /** Brands present in the current result set. */
+  brands: string[];
   onApply: (filters: FilterState) => void;
   onClose: () => void;
 }
@@ -27,7 +22,7 @@ function Chip({ label, active, onPress }: { label: string; active: boolean; onPr
   );
 }
 
-export function FilterSheet({ visible, filters, onApply, onClose }: FilterSheetProps) {
+export function FilterSheet({ visible, filters, brands, onApply, onClose }: FilterSheetProps) {
   const [draft, setDraft] = useState<FilterState>(filters);
 
   useEffect(() => {
@@ -56,19 +51,7 @@ export function FilterSheet({ visible, filters, onApply, onClose }: FilterSheetP
         </View>
 
         <ScrollView style={styles.body} showsVerticalScrollIndicator={false}>
-          <Text style={styles.sectionTitle}>Category</Text>
-          <View style={styles.chipWrap}>
-            {RESULT_CATEGORY_CHIPS.map((category) => (
-              <Chip
-                key={category}
-                label={category}
-                active={draft.category === category}
-                onPress={() => setDraft((prev) => ({ ...prev, category }))}
-              />
-            ))}
-          </View>
-
-          <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Price Range</Text>
+          <Text style={styles.sectionTitle}>Price Range</Text>
           <Text style={styles.priceHint}>₹0 – ₹500+</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.priceScroll}>
             <View style={styles.priceRow}>
@@ -88,9 +71,9 @@ export function FilterSheet({ visible, filters, onApply, onClose }: FilterSheetP
             </View>
           </ScrollView>
 
-          <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Brand</Text>
+          {brands.length > 0 ? <Text style={[styles.sectionTitle, styles.sectionSpacing]}>Brand</Text> : null}
           <View style={styles.brandList}>
-            {FILTER_BRANDS.map((brand) => {
+            {brands.map((brand) => {
               const checked = draft.brands.includes(brand);
               return (
                 <Pressable key={brand} style={styles.brandRow} onPress={() => toggleBrand(brand)}>
